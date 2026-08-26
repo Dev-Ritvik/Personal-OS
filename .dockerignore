@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+backups
+test-results
+playwright-report
+dev.log
+.env
+.env.*
+!prisma
+setup-token.txt
+session.xml
+perf-results.json

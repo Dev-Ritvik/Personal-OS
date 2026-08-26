@@ -115,13 +115,21 @@ export async function idempotent<T>(
     if (ageMs < IDEMPOTENCY_TTL_MS) {
       throw new ApiError(409, "op_in_flight", "Operation already in progress; retry shortly");
     }
-    // Stale reservation (crashed process): atomically claim it.
+    // Stale reservation (crashed process): COMPARE-AND-SWAP claim.
+    // The WHERE pins the exact receivedAt THIS caller observed — if another
+    // stale caller claimed between our read and our write, its timestamp
+    // differs, our update matches zero rows, and we bow out (transient 409).
+    // Exactly one concurrent caller can ever hold ownership.
     const claimed = await prisma.syncOp.updateMany({
-      where: { clientOpId, response: { equals: Prisma.AnyNull } },
+      where: {
+        clientOpId,
+        response: { equals: Prisma.AnyNull },
+        receivedAt: existing.receivedAt,
+      },
       data: { receivedAt: new Date() },
     });
     if (claimed.count === 0) {
-      throw new ApiError(409, "op_in_flight", "Operation already in progress; retry shortly");
+      throw new ApiError(409, "op_in_flight", "Operation claimed by another caller; retry shortly");
     }
   } else {
     try {
@@ -143,12 +151,20 @@ export async function idempotent<T>(
 
   try {
     const result = await handler();
-    await prisma.syncOp.update({
-      where: { clientOpId },
+    // Ownership-safe response store: only the CURRENT owner (response still
+    // null) may write. A superseded caller never clobbers the winner.
+    const stored = await prisma.syncOp.updateMany({
+      where: { clientOpId, response: { equals: Prisma.AnyNull } },
       data: { response: result as object },
     });
+    if (stored.count === 0) {
+      // Our ownership was taken over mid-handler (handler exceeded TTL).
+      // The new owner will produce/store a response; surface transient conflict.
+      throw new ApiError(409, "op_superseded", "Operation ownership changed during execution; retry");
+    }
     return { result, replayed: false };
   } catch (err) {
+    if (err instanceof ApiError && err.code === "op_superseded") throw err;
     // Never leave a poisoned reservation behind: the op is retryable as-is.
     await prisma.syncOp
       .deleteMany({ where: { clientOpId, response: { equals: Prisma.AnyNull } } })

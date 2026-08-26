@@ -31,6 +31,7 @@ services:
       target: migrator
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-pos}@db:5432/pos
+      DIRECT_URL: postgresql://postgres:${POSTGRES_PASSWORD:-pos}@db:5432/pos
     depends_on:
       db:
         condition: service_healthy
@@ -45,6 +46,7 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-pos}@db:5432/pos
+      DIRECT_URL: postgresql://postgres:${POSTGRES_PASSWORD:-pos}@db:5432/pos
       APP_SECRET: ${APP_SECRET:?set APP_SECRET}
       SETUP_TOKEN: ${SETUP_TOKEN:-bootstrap-then-remove-me-0123456789}
       CRON_SECRET: ${CRON_SECRET:-}

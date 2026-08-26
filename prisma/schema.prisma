@@ -7,12 +7,20 @@
 //  - IDs generated in application layer as UUIDv7 (time-sortable).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Runtime connection. On Supabase this is the POOLED url (pgBouncer,
+  // port 6543) with ?pgbouncer=true&connection_limit=1&pool_timeout=5.
+  // Locally / self-hosted: the direct database URL (both vars identical).
+  url = env("DATABASE_URL")
+  // Migration/CLI connection (prisma migrate deploy). Must be a DIRECT
+  // (session-mode, port 5432) connection — PgBouncer transaction mode is not
+  // supported by Prisma Migrate. Phase-5 remediation; see .env.example.
+  directUrl = env("DIRECT_URL")
 }
 
 enum ValueClass {

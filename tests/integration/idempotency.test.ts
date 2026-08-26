@@ -123,6 +123,102 @@ const ready = await ensureTestDb();
     expect(r2.result).toEqual({ recovered: true });
   });
 
+  it("8. CONCURRENT stale claimers: CAS ownership → handler executes EXACTLY once", async () => {
+    const op = crypto.randomUUID();
+    await prisma.syncOp.create({
+      data: {
+        id: crypto.randomUUID(),
+        userId,
+        clientOpId: op,
+        op: {},
+        receivedAt: new Date(Date.now() - IDEMPOTENCY_TTL_MS - 5_000),
+      },
+    });
+
+    let executions = 0;
+    const handler = async () => {
+      executions++;
+      await prisma.auditLog.create({
+        data: { id: crypto.randomUUID(), actor: userId, action: "c4race", entity: "probe" },
+      });
+      return { ok: true, n: executions };
+    };
+
+    // Both callers read the SAME stale reservation before either claims.
+    const settled = await Promise.allSettled([
+      idempotent(userId, op, "probe", handler),
+      idempotent(userId, op, "probe", handler),
+    ]);
+
+    // Invariant: exactly ONE domain side effect.
+    expect(executions).toBe(1);
+    expect(
+      await prisma.auditLog.count({ where: { actor: userId, action: "c4race" } }),
+    ).toBe(1);
+
+    // Exactly one response stored on the reservation.
+    const row = await prisma.syncOp.findUniqueOrThrow({ where: { clientOpId: op } });
+    expect(row.response).not.toBeNull();
+
+    // Winner fulfilled non-replayed; loser either transient-409'd or — if it
+    // happened to read after the response landed — replayed. Never executed.
+    const fulfilled = settled.filter(
+      (s) => s.status === "fulfilled",
+    ) as PromiseFulfilledResult<any>[];
+    const rejected = settled.filter(
+      (s) => s.status === "rejected",
+    ) as PromiseRejectedResult[];
+    expect(fulfilled.length).toBeGreaterThanOrEqual(1);
+    for (const f of fulfilled) {
+      if (!f.value.replayed) {
+        expect((f.value.result as { n: number }).n).toBe(1);
+      }
+    }
+    for (const r of rejected) {
+      expect((r.reason as ApiError).code).toBe("op_in_flight");
+    }
+
+    // Five subsequent retries converge: every one replays the stored response;
+    // no further execution.
+    for (let i = 0; i < 5; i++) {
+      const again = await idempotent(userId, op, "probe", handler);
+      expect(again.replayed).toBe(true);
+      expect(again.result).toEqual({ ok: true, n: 1 });
+    }
+    expect(executions).toBe(1);
+    expect(await prisma.auditLog.count({ where: { actor: userId, action: "c4race" } })).toBe(1);
+  });
+
+  it("9. superseded owner cannot overwrite the winner's stored response", async () => {
+    const op = crypto.randomUUID();
+    // Stale reservation so caller A can claim and enter its handler.
+    await prisma.syncOp.create({
+      data: {
+        id: crypto.randomUUID(),
+        userId,
+        clientOpId: op,
+        op: {},
+        receivedAt: new Date(Date.now() - IDEMPOTENCY_TTL_MS - 1_000),
+      },
+    });
+
+    // Caller A's handler runs LONGER than the TTL. Mid-handler we age the
+    // reservation and let caller B complete the entire claim→store lifecycle.
+    const loser = idempotent(userId, op, "t", async () => {
+      await prisma.syncOp.update({
+        where: { clientOpId: op },
+        data: { receivedAt: new Date(Date.now() - IDEMPOTENCY_TTL_MS - 1_000) },
+      });
+      await idempotent(userId, op, "t", async () => ({ winner: true }));
+      return { loser: true };
+    });
+
+    await expect(loser).rejects.toMatchObject({ code: "op_superseded" });
+
+    const row = await prisma.syncOp.findUniqueOrThrow({ where: { clientOpId: op } });
+    expect(row.response).toMatchObject({ winner: true });
+  });
+
   it("cross-user clientOpId collision is rejected, never replayed across principals", async () => {
     const other = await makeUser();
     const op = crypto.randomUUID();
