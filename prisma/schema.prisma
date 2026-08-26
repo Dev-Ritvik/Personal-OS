@@ -1,0 +1,438 @@
+// POS data model — ARCHITECTURE.md §13 (authoritative)
+// Conventions:
+//  - All timestamps are timestamptz (UTC) via Prisma DateTime.
+//  - `local_date` columns are STORED at write time (device tz) and never re-derived.
+//  - Config entities soft-delete (deleted_at). Analytical entities void (voided_at)
+//    + amendment chain (amended_by). History is never destroyed.
+//  - IDs generated in application layer as UUIDv7 (time-sortable).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ValueClass {
+  productive
+  maintenance
+  intentional_leisure
+  unproductive
+  neutral
+}
+
+enum GoalHorizon {
+  life
+  annual
+  quarterly
+}
+
+enum GoalKind {
+  objective
+  project
+  milestone
+}
+
+enum MeasureType {
+  binary
+  quantity
+  duration
+  frequency
+  percentage
+  milestone
+  deadline
+  cumulative
+  rate
+}
+
+enum Direction {
+  at_least
+  at_most
+}
+
+enum GoalStatus {
+  draft
+  active
+  paused
+  achieved
+  abandoned
+  archived
+}
+
+enum BehaviorStatus {
+  draft
+  active
+  paused
+  retired
+}
+
+enum TaskStatus {
+  todo
+  doing
+  done
+  cancelled
+}
+
+enum PlanRefType {
+  behavior
+  task
+}
+
+enum PlanOrigin {
+  schedule
+  manual
+  ad_hoc
+}
+
+enum EntrySource {
+  timer
+  quick_log
+  retro
+  import
+}
+
+enum EventType {
+  interruption
+  distraction
+  idle
+  note
+}
+
+enum Disposition {
+  shown
+  dismissed
+  acted
+}
+
+model User {
+  id                  String   @id
+  email               String   @unique
+  passwordHash        String?  @map("password_hash")
+  webauthnCredentials Json?    @map("webauthn_credentials")
+  totpSecretEnc       String?  @map("totp_secret_enc")
+  totpConfirmed       Boolean  @default(false) @map("totp_confirmed")
+  failedAttempts      Int      @default(0) @map("failed_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  timezone            String   @default("UTC")
+  wakingStartMin      Int      @default(420) @map("waking_start_min") // minutes from midnight, local
+  wakingEndMin        Int      @default(1380) @map("waking_end_min")
+  prefs               Json     @default("{}")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  sessions          Session[]
+  categories        Category[]
+  goals             Goal[]
+  behaviors         Behavior[]
+  tasks             Task[]
+  planInstances     PlanInstance[]
+  timeEntries       TimeEntry[]
+  measurements      Measurement[]
+  events            Event[]
+  reflections       Reflection[]
+  interventionsLog  InterventionLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String    @id
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Category {
+  id         String     @id
+  userId     String     @map("user_id")
+  name       String
+  valueClass ValueClass @map("value_class")
+  sort       Int        @default(0)
+  archivedAt DateTime?  @map("archived_at")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  user          User              @relation(fields: [userId], references: [id])
+  history       CategoryHistory[]
+  behaviors     Behavior[]
+  timeEntries   TimeEntry[]
+  events        Event[]
+
+  @@index([userId])
+  @@map("categories")
+}
+
+/// value_class changes are versioned: they change historical analytics meaning.
+model CategoryHistory {
+  id         String     @id
+  categoryId String     @map("category_id")
+  field      String
+  oldValue   String     @map("old_value")
+  newValue   String     @map("new_value")
+  changedAt  DateTime   @default(now()) @map("changed_at")
+
+  category Category @relation(fields: [categoryId], references: [id])
+
+  @@index([categoryId])
+  @@map("category_history")
+}
+
+model Goal {
+  id           String      @id
+  userId       String      @map("user_id")
+  parentId     String?     @map("parent_id")
+  title        String
+  description  String?
+  horizon      GoalHorizon
+  kind         GoalKind
+  measureType  MeasureType @map("measure_type")
+  unit         String?
+  targetValue  Decimal?    @db.Decimal(14, 4) @map("target_value")
+  /// Manual progress updates for quantity/duration/deadline goals (§6.2).
+  /// Amendment note: added during implementation; target alone cannot express
+  /// "current" without fabricating it from unrelated records.
+  currentValue Decimal?    @map("current_value") @db.Decimal(14, 4)
+  direction    Direction   @default(at_least)
+  startDate    DateTime?   @map("start_date") @db.Date
+  targetDate   DateTime?   @map("target_date") @db.Date
+  status       GoalStatus  @default(draft)
+  closedAt     DateTime?   @map("closed_at")
+  closingValue Decimal?    @db.Decimal(14, 4) @map("closing_value")
+  sort         Int         @default(0)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  deletedAt    DateTime?   @map("deleted_at")
+
+  parent    Goal?     @relation("GoalTree", fields: [parentId], references: [id])
+  children  Goal[]    @relation("GoalTree")
+  user      User      @relation(fields: [userId], references: [id])
+  behaviors Behavior[]
+  tasks     Task[]
+
+  @@index([parentId])
+  @@index([userId, status])
+  @@map("goals")
+}
+
+model Behavior {
+  id           String         @id
+  userId       String         @map("user_id")
+  goalId       String?        @map("goal_id")
+  categoryId   String?        @map("category_id")
+  title        String
+  schedule     Json
+  target       Json
+  status       BehaviorStatus @default(active)
+  startedOn    DateTime       @default(now()) @map("started_on") @db.Date
+  pausedUntil  DateTime?      @map("paused_until") @db.Date
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  deletedAt    DateTime?      @map("deleted_at")
+
+  user          User           @relation(fields: [userId], references: [id])
+  goal          Goal?          @relation(fields: [goalId], references: [id])
+  category      Category?      @relation(fields: [categoryId], references: [id])
+  timeEntries   TimeEntry[]
+  tasks         Task[]
+
+  @@index([userId, status])
+  @@map("behaviors")
+}
+
+model Task {
+  id             String     @id
+  userId         String     @map("user_id")
+  goalId         String?    @map("goal_id")
+  behaviorId     String?    @map("behavior_id")
+  title          String
+  notes          String?
+  estimateMin    Int?       @map("estimate_min")
+  dueDate        DateTime?  @map("due_date") @db.Date
+  priority       Int?       @default(0) @db.SmallInt
+  status         TaskStatus @default(todo)
+  deferredCount  Int        @default(0) @map("deferred_count")
+  lastDeferredAt DateTime?  @map("last_deferred_at")
+  completedAt    DateTime?  @map("completed_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+  deletedAt      DateTime?  @map("deleted_at")
+
+  user          User           @relation(fields: [userId], references: [id])
+  goal          Goal?          @relation(fields: [goalId], references: [id])
+  behavior      Behavior?      @relation(fields: [behaviorId], references: [id])
+  timeEntries   TimeEntry[]
+
+  @@index([status, dueDate])
+  @@map("tasks")
+}
+
+model PlanInstance {
+  id             String       @id
+  userId         String       @map("user_id")
+  localDate      DateTime     @map("local_date") @db.Date
+  refType        PlanRefType  @map("ref_type")
+  refId          String       @map("ref_id")
+  origin         PlanOrigin
+  plannedMinutes Int?         @map("planned_minutes")
+  plannedQty     Decimal?     @db.Decimal(12, 3) @map("planned_qty")
+  actualMinutes  Int?         @map("actual_minutes")
+  actualQty      Decimal?     @db.Decimal(12, 3) @map("actual_qty")
+  met            Boolean?
+  doneAt         DateTime?    @map("done_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  voidedAt       DateTime?    @map("voided_at")
+
+  user     User       @relation(fields: [userId], references: [id])
+
+  @@index([localDate])
+  @@index([userId, localDate])
+  @@map("plan_instances")
+}
+
+model TimeEntry {
+  id           String      @id
+  userId       String      @map("user_id")
+  startedAt    DateTime    @map("started_at")
+  endedAt      DateTime?   @map("ended_at")
+  localDate    DateTime    @map("local_date") @db.Date
+  durationSec  Int?        @map("duration_sec")
+  source       EntrySource
+  taskId       String?     @map("task_id")
+  behaviorId   String?     @map("behavior_id")
+  categoryId   String?     @map("category_id")
+  note         String?
+  deviceId     String?     @map("device_id")
+  autoClosed   Boolean     @default(false) @map("auto_closed")
+  amendedBy    String?     @unique @map("amended_by")
+  voidedAt     DateTime?   @map("voided_at")
+  clientOpId   String?     @unique @map("client_op_id")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id])
+  task      Task?      @relation(fields: [taskId], references: [id])
+  behavior  Behavior?  @relation(fields: [behaviorId], references: [id])
+  category  Category?  @relation(fields: [categoryId], references: [id])
+
+  @@index([startedAt])
+  @@index([userId, localDate])
+  @@index([categoryId])
+  @@map("time_entries")
+}
+
+model Measurement {
+  id        String    @id
+  userId    String    @map("user_id")
+  key       String
+  takenOn   DateTime  @map("taken_on") @db.Date
+  value     Decimal   @db.Decimal(12, 4)
+  source    String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  voidedAt  DateTime? @map("voided_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, key, takenOn])
+  @@map("measurements")
+}
+
+model Event {
+  id          String    @id
+  userId      String    @map("user_id")
+  type        EventType
+  occurredAt  DateTime  @map("occurred_at")
+  localDate   DateTime  @map("local_date") @db.Date
+  durationSec Int       @default(0) @map("duration_sec")
+  categoryId  String?   @map("category_id")
+  timeEntryId String?   @map("time_entry_id")
+  note        String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  voidedAt    DateTime? @map("voided_at")
+
+  user      User       @relation(fields: [userId], references: [id])
+  category  Category?  @relation(fields: [categoryId], references: [id])
+
+  @@index([userId, localDate])
+  @@map("events")
+}
+
+model Reflection {
+  id        String    @id
+  userId    String    @map("user_id")
+  localDate DateTime  @map("local_date") @db.Date
+  energy    Int?      @db.SmallInt
+  content   String
+  tags      String[]
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  voidedAt  DateTime? @map("voided_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, localDate])
+  @@map("reflections")
+}
+
+model MetricSnapshot {
+  metricKey  String   @map("metric_key")
+  localDate  DateTime @map("local_date") @db.Date
+  value      Float
+  payload    Json?
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([metricKey, localDate])
+  @@map("metric_snapshots")
+}
+
+model InterventionLog {
+  id          String      @id
+  userId      String      @map("user_id")
+  ruleKey     String      @map("rule_key")
+  firedAt     DateTime    @default(now()) @map("fired_at")
+  evidence    Json
+  disposition Disposition
+  meta        Json?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, ruleKey, firedAt])
+  @@map("intervention_log")
+}
+
+model AuditLog {
+  id       String   @id
+  actor    String
+  action   String
+  entity   String
+  entityId String?  @map("entity_id")
+  diff     Json?
+  at       DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
+
+model SyncOp {
+  id          String   @id
+  userId      String   @map("user_id")
+  clientOpId  String   @unique @map("client_op_id")
+  op          Json
+  response    Json?
+  receivedAt  DateTime @default(now()) @map("received_at")
+
+  @@index([userId, receivedAt])
+  @@map("sync_ops")
+}

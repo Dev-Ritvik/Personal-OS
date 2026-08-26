@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design language (§5.2): calm analytical instrument. Neutral dark surfaces,
+   single restrained accent, monospaced numerics, no decorative noise. */
+:root {
+  --bg: #0e1116;
+  --panel: #141920;
+  --panel-2: #1a212b;
+  --line: #232c37;
+  --ink: #d6dde6;
+  --muted: #8a94a2;
+  --faint: #5a6472;
+  --accent: #7aa2f7;
+  --ok: #74c69d;
+  --warn: #d9a55b;
+  --bad: #cf6a6a;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --panel-2: #eef1f5;
+    --line: #d9dee5;
+    --ink: #1c2530;
+    --muted: #5b6570;
+    --faint: #98a1ac;
+    --accent: #3b6fd4;
+    --ok: #2e7d54;
+    --warn: #9a6b1f;
+    --bad: #b04a4a;
+  }
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+* {
+  border-color: var(--line);
+}
+
+.num {
+  font-family: theme("fontFamily.num");
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.btn {
+  @apply inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-xs font-medium transition-colors;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.btn:hover { border-color: var(--accent); }
+.btn:disabled { opacity: 0.45; }
+
+.btn-accent {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+.input {
+  @apply w-full rounded px-2.5 py-1.5 text-sm outline-none;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.input:focus { border-color: var(--accent); }
+
+.label { @apply block text-2xs uppercase tracking-wider mb-1; color: var(--faint); }
+
+.chip {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-2xs;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.chip-fact { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.chip-metric { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.chip-inference { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.chip-insufficient { color: var(--faint); font-style: italic; }

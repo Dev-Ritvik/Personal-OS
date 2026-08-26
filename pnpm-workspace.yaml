@@ -1,0 +1,10 @@
+packages: []
+
+verifyDepsBeforeRun: false
+
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - prisma
+  - esbuild
+  - unrs-resolver

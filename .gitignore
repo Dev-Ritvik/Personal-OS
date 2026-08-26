@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# production
+build/
+dist/
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+
+# testing
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# misc
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+.vercel
+
+# never commit database dumps
+*.sql.gz
+*.dump
+
+# local runtime artifacts
+setup-token.txt
+session.xml
+dev.log
