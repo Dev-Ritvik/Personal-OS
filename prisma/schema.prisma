@@ -261,6 +261,9 @@ model Task {
   dueDate        DateTime?  @map("due_date") @db.Date
   priority       Int?       @default(0) @db.SmallInt
   status         TaskStatus @default(todo)
+  /// Frozen at the moment of completion using the resolving tz (C9).
+  /// Null for legacy rows → loaders fall back to documented derivation.
+  completedLocalDate DateTime? @map("completed_local_date") @db.Date
   deferredCount  Int        @default(0) @map("deferred_count")
   lastDeferredAt DateTime?  @map("last_deferred_at")
   completedAt    DateTime?  @map("completed_at")

@@ -67,7 +67,7 @@ export async function loadRawInputs(
           lte: new Date(to.getTime() + 12 * 3600_000),
         },
       },
-      select: { completedAt: true, status: true, deferredCount: true, id: true },
+      select: { completedAt: true, completedLocalDate: true, status: true, deferredCount: true, id: true },
     }),
   ]);
 
@@ -100,9 +100,12 @@ export async function loadRawInputs(
     })),
     ...doneTasks.map((t) => ({
       dueDate: null,
-      completedOn: t.completedAt
-        ? localDateInTz(t.completedAt, opts.timezone)
-        : null,
+      // C9: frozen completion day preferred. Legacy rows (field null) fall
+      // back to read-time derivation with the current profile tz — documented,
+      // bounded to pre-remediation data only.
+      completedOn:
+        t.completedLocalDate?.toISOString().slice(0, 10) ??
+        (t.completedAt ? localDateInTz(t.completedAt, opts.timezone) : null),
       status: t.status as RawTask["status"],
       deferredCount: t.deferredCount,
     })),

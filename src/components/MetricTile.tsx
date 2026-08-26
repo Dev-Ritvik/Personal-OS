@@ -16,6 +16,27 @@ function fmtVal(v: number): string {
   return v.toFixed(2);
 }
 
+/** Widened value contract: tiles render numeric metrics, but the envelope is
+ *  structurally checked so call-site narrowing stays simple. */
+export interface TileResult {
+  status: "ok" | "insufficient_data";
+  value?: unknown;
+  gates: Array<{ name: string; observed: number; required: number; passed: boolean }>;
+  meta: {
+    key: string;
+    label: string;
+    formula: string;
+    epistemic: string;
+    interpretation: string;
+    limitation: string;
+  };
+}
+
+function renderValue(v: unknown, digits: number): string {
+  if (typeof v === "number") return v.toFixed(digits);
+  return String(v);
+}
+
 /**
  * Every displayed number renders through this tile (AC15): value + gate state
  * + epistemic badge + full formula/interpretation/limitation popover.
@@ -26,7 +47,7 @@ export function MetricTile({
   suffix,
   digits = 2,
 }: {
-  result?: MetricResultDto;
+  result?: TileResult;
   suffix?: string;
   digits?: number;
 }) {
@@ -66,7 +87,7 @@ export function MetricTile({
             </span>
           ) : (
             <>
-              {fmtVal(result.value!)}
+              {renderValue(result.value, digits)}
               {suffix && (
                 <span className="text-sm font-normal ml-1" style={{ color: "var(--muted)" }}>
                   {suffix}

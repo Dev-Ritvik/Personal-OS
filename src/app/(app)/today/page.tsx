@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useToday, useCheckin, useTaskMutations } from "@/lib/client/hooks";
 import { CaptureBar } from "@/components/CaptureBar";
-import { MetricTile, pct } from "@/components/MetricTile";
+import { MetricTile } from "@/components/MetricTile";
 import { PlanVsActual } from "@/components/PlanVsActual";
 
 /**
@@ -139,46 +139,52 @@ export default function TodayPage() {
             <MetricTile result={m.unknownTimeShareToday} suffix="unknown" digits={0} />
             <MetricTile result={m.consistency30d} suffix="30d consistency" digits={0} />
             <MetricTile result={m.overplanningRatio} suffix="× baseline planned" />
+            <MetricTile
+              result={
+                m.variance14d.status === "ok"
+                  ? {
+                      status: "ok",
+                      value: Math.round(m.variance14d.value!.minutes),
+                      gates: m.variance14d.gates,
+                      meta: m.variance14d.meta,
+                    }
+                  : m.variance14d
+              }
+              suffix="min variance 14d"
+              digits={0}
+            />
+            <MetricTile result={m.underExecution14d} suffix="under-executed 14d" digits={0} />
+            <MetricTile
+              result={
+                m.postponement.status === "ok"
+                  ? {
+                      status: "ok",
+                      value: m.postponement.value!.chronicCount,
+                      gates: m.postponement.gates,
+                      meta: m.postponement.meta,
+                    }
+                  : m.postponement
+              }
+              suffix="chronic deferrals"
+              digits={0}
+            />
           </div>
 
+          {/* AC15: goal pace renders through the same provenance pipeline as
+              every other metric — formula, gates, epistemic class. */}
           {data.goalPace.length > 0 && (
-            <div className="panel rounded p-3">
-              <h3 className="text-2xs uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>
-                Goal pace — behind first
-              </h3>
-              <ul className="space-y-2">
-                {data.goalPace.map((g) => (
-                  <li key={g.goalId}>
-                    <Link href={`/goals/${g.goalId}`} className="text-xs hover:underline truncate block">
-                      {g.title}
-                    </Link>
-                    <div className="num text-2xs" style={{ color: g.pace < 0.8 ? "var(--warn)" : "var(--muted)" }}>
-                      pace {(g.pace).toFixed(2)} · need {g.requiredVelocityPerDay.toFixed(2)}/day · doing{" "}
-                      {g.observedVelocityPerDay.toFixed(2)}/day
-                    </div>
-                  </li>
-                ))}
-              </ul>
+            <div className="grid grid-cols-1 gap-2">
+              {data.goalPace.map((g) => (
+                <div key={g.goalId}>
+                  <MetricTile result={g.result} digits={2} />
+                  <p className="num text-2xs mt-0.5 px-1" style={{ color: "var(--muted)" }}>
+                    need {g.requiredVelocityPerDay.toFixed(2)}/day · doing{" "}
+                    {g.observedVelocityPerDay.toFixed(2)}/day
+                  </p>
+                </div>
+              ))}
             </div>
           )}
-
-          <details className="panel rounded p-3 text-2xs" style={{ color: "var(--muted)" }}>
-            <summary className="cursor-pointer">Variance & execution detail</summary>
-            <div className="mt-2 num">
-              variance14d:{" "}
-              {m.variance14d.status === "ok"
-                ? `${Math.round(m.variance14d.value!.minutes)} min (${pct(m.variance14d.value!.pct)})`
-                : "insufficient"}
-              <br />
-              under-execution:{" "}
-              {m.underExecution14d.status === "ok"
-                ? pct(m.underExecution14d.value!)
-                : "insufficient"}
-              <br />
-              chronic deferrals:{" "}
-              {m.postponement.status === "ok" ? m.postponement.value!.chronicCount : "—"}
-            </div>
-          </details>
         </aside>
       </div>
     </div>

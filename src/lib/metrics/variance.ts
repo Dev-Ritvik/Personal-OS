@@ -71,12 +71,19 @@ export function overplanningRatio(facts: DayFact[]): MetricResult<number> {
   if (facts.length < 28) {
     return insufficient(M8, [gate("history_days", facts.length, 28)]);
   }
-  const baselineDays = facts.slice(-28).map(productiveMinutes).filter((m) => m >= 0);
-  const baselineMedianMin = median(baselineDays);
+  // C10 remediation: capacity baseline is the median over LOGGED days only.
+  // Days with no recorded activity are missing observations of capacity, not
+  // evidence of zero capacity; including them drags the median toward zero
+  // and fabricates overplanning signals for patchy loggers.
+  const window = facts.slice(-28);
+  const loggedDays = window.filter(
+    (f) => f.categorizedByClass.productive > 0,
+  );
+  const baselineMedianMin = median(loggedDays.map((f) => f.categorizedByClass.productive));
 
   const recent = facts.slice(-7).filter((f) => f.plannedMinutes !== null);
   const gates = [
-    gate("baseline_productive_days", baselineDays.length, 14),
+    gate("logged_baseline_days", loggedDays.length, 14),
     gate("recent_planned_days", recent.length, 5),
     gate("nonzero_baseline", baselineMedianMin > 0 ? 1 : 0, 1),
   ];

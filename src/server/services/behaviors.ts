@@ -32,6 +32,7 @@ export async function updateBehavior(
   userId: string,
   id: string,
   input: Record<string, unknown>,
+  opts: { todayLocal: string },
 ) {
   const existing = await prisma.behavior.findFirst({ where: { id, userId, deletedAt: null } });
   if (!existing) throw new ApiError(404, "not_found", "Behavior not found");
@@ -46,6 +47,7 @@ export async function updateBehavior(
   const updated = await prisma.behavior.update({ where: { id }, data });
 
   // Schedule changes invalidate future generated plans; regenerate lazily.
+  // "Future" is resolved in the caller's diary tz (C2) — never server-UTC.
   if (input.schedule) {
     await prisma.planInstance.updateMany({
       where: {
@@ -54,7 +56,7 @@ export async function updateBehavior(
         origin: "schedule",
         voidedAt: null,
         doneAt: null,
-        localDate: { gt: new Date(new Date().toISOString().slice(0, 10)) },
+        localDate: { gt: new Date(`${opts.todayLocal}T00:00:00Z`) },
       },
       data: { voidedAt: new Date() },
     });

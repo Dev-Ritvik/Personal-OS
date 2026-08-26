@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { executionRate, consistencyScore } from "./execution";
+import { executionRate, consistencyScore, scheduleReliability } from "./execution";
 import {
   planActualVariance,
   overplanningRatio,
   underExecutionRatio,
 } from "./variance";
-import { unknownTimeShare, degradedConfidence } from "./unknownTime";
+import { unknownTimeShare, degradedConfidence, type ConfidenceDay } from "./unknownTime";
 import { postponeSummary, overdueAccumulation } from "./postponement";
 import { goalPace } from "./goalPace";
 import { buildDayFacts, totalCategorized } from "./facts";
@@ -166,10 +166,35 @@ describe("M4 unknownTimeShare", () => {
     expect(unknownTimeShare(f[0]!).value).toBe(1);
   });
 
-  it("degradedConfidence meta-gate at >60% across last 5 days", () => {
-    expect(degradedConfidence([0.7, 0.65, 0.61])).toBe(true);
-    expect(degradedConfidence([0.6, 0.6])).toBe(false); // strict >
+  it("degradedConfidence meta-gate FAILS CLOSED on any insufficient day (C3)", () => {
+    const obs = (s: number): ConfidenceDay => ({ kind: "observed", share: s });
+    const ins: ConfidenceDay = { kind: "insufficient" };
+
+    // Fully observed, healthy week → confident.
+    expect(degradedConfidence([obs(0.2), obs(0.3), obs(0.4), obs(0.5), obs(0.55)])).toBe(false);
+
+    // >60% unknown observed days → degraded.
+    expect(degradedConfidence([obs(0.7), obs(0.65), obs(0.61)])).toBe(true);
+
+    // Boundary: exactly 0.6 is NOT above the strict threshold.
+    expect(degradedConfidence([obs(0.6), obs(0.6)])).toBe(false);
+
+    // A single unobserved (no waking budget) day in the window → degraded.
+    expect(degradedConfidence([obs(0.1), obs(0.1), ins])).toBe(true);
+
+    // An ENTIRELY unobserved week must never read as high confidence.
+    expect(degradedConfidence([ins, ins, ins, ins, ins])).toBe(true);
+
+    // Empty input → no basis for confidence at all.
     expect(degradedConfidence([])).toBe(true);
+  });
+
+  it("M10 schedule reliability carries its own identity (C10 provenance fix)", () => {
+    const r = scheduleReliability(perfectMonth(END));
+    expect(r.status).toBe("ok");
+    expect(r.meta.key).toBe("m10_schedule_reliability");
+    expect(r.meta.label).toBe("Schedule reliability");
+    expect(r.meta.formula).toContain("14d");
   });
 });
 
@@ -230,15 +255,24 @@ describe("M6 overdueAccumulation", () => {
   });
 });
 
-describe("M8 overplanningRatio", () => {
-  function monthWithBaseline(end: string, productive: number, plannedRecent: number | null) {
+describe("M8 overplanningRatio (logged-day baseline)", () => {
+  function monthWithBaseline(
+    end: string,
+    productive: number,
+    plannedRecent: number | null,
+    zeroLoggedDays = 0,
+  ) {
     const days = trailingDays(end, 28);
     return mkFacts(
       days.map((date, i) => ({
         date,
-        productiveMin: productive,
-        plannedMinutes: i >= 21 && plannedRecent !== null ? plannedRecent : null,
-        executedPlannedMinutes: i >= 21 && plannedRecent !== null ? Math.round(plannedRecent / 2) : null,
+        // Zero-logged days are MISSING capacity observations, placed early in
+        // the window so the trailing week stays planned.
+        productiveMin: i < zeroLoggedDays ? 0 : productive,
+        plannedMinutes:
+          i >= 21 && plannedRecent !== null ? plannedRecent : null,
+        executedPlannedMinutes:
+          i >= 21 && plannedRecent !== null ? Math.round(plannedRecent / 2) : null,
       })),
     );
   }
@@ -249,6 +283,21 @@ describe("M8 overplanningRatio", () => {
     expect(r.value).toBeCloseTo(2.0, 10);
   });
 
+  it("zero-logged days do NOT contaminate the capacity median", () => {
+    // 13 zero-logged days + 15 logged@120. Naive all-day median would be 0;
+    // logged-only median is 120 ⇒ ratio stays mean(240)/median(120)=2.0.
+    const r = overplanningRatio(monthWithBaseline(END, 120, 240, 13));
+    expect(r.status).toBe("ok");
+    expect(r.value).toBeCloseTo(2.0, 10);
+    expect(r.gates.find((g) => g.name === "logged_baseline_days")?.observed).toBe(15);
+  });
+
+  it("gate: fewer than 14 LOGGED baseline days → insufficient", () => {
+    const r = overplanningRatio(monthWithBaseline(END, 120, 240, 20));
+    expect(r.status).toBe("insufficient_data");
+    expect(r.gates.map((g) => g.name)).toContain("logged_baseline_days");
+  });
+
   it("gate: short history → insufficient naming history_days", () => {
     const days = trailingDays(END, 20);
     const r = overplanningRatio(mkFacts(days.map((date) => ({ date, productiveMin: 100 }))));
@@ -256,10 +305,10 @@ describe("M8 overplanningRatio", () => {
     expect(r.gates[0]?.name).toBe("history_days");
   });
 
-  it("gate: zero productive baseline (unlogged reality) → insufficient, honest blindness", () => {
+  it("gate: fully unlogged month → insufficient (honest blindness)", () => {
     const r = overplanningRatio(monthWithBaseline(END, 0, 240));
     expect(r.status).toBe("insufficient_data");
-    expect(r.gates.map((g) => g.name)).toContain("nonzero_baseline");
+    expect(r.gates.some((g) => !g.passed)).toBe(true);
   });
 });
 
@@ -272,13 +321,12 @@ describe("M9 underExecutionRatio", () => {
     expect(r.value).toBeCloseTo(0.5, 10);
   });
 
-  it("overshoot reports negative ratio truthfully", () => {
+  it("overshoot now yields a genuinely negative ratio (C10 clamp removed)", () => {
     const days = trailingDays(END, 8);
-    // exec capped at planned by builder semantics; simulate via direct fact edit
     const facts = mkFacts(days.map((date) => ({ date, plannedMinutes: 50 })));
-    const patched = facts.map((f) => ({ ...f, executedPlannedMinutes: 50 }));
+    const patched = facts.map((f) => ({ ...f, executedPlannedMinutes: 100 }));
     const r = underExecutionRatio(patched);
-    expect(r.value).toBeCloseTo(0, 10);
+    expect(r.value).toBeCloseTo(-1, 10); // did twice the plan
   });
 
   it("gate: 6 planned days → insufficient", () => {
@@ -374,7 +422,7 @@ describe("buildDayFacts", () => {
     expect(totalCategorized(facts[0]!)).toBe(0);
   });
 
-  it("executed-planned clamps overshoot at planned target", () => {
+  it("executed-planned now records overshoot truthfully (C10 clamp removed)", () => {
     const plans: RawPlanInstance[] = [
       {
         localDate: D1,
@@ -387,7 +435,7 @@ describe("buildDayFacts", () => {
     ];
     const facts = buildDayFacts([D1], { entries: [], planInstances: plans, tasks: [] });
     expect(facts[0]!.plannedMinutes).toBe(30);
-    expect(facts[0]!.executedPlannedMinutes).toBe(30);
+    expect(facts[0]!.executedPlannedMinutes).toBe(90);
     expect(facts[0]!.behaviorScheduled).toBe(1);
     expect(facts[0]!.behaviorMet).toBe(1);
   });

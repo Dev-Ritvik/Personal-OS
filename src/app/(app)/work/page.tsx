@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTasks, useTaskMutations } from "@/lib/client/hooks";
-import { deviceTimezone, api } from "@/lib/client/api";
+import { localToday } from "@/lib/client/api";
+import { OpStatus } from "@/components/OpStatus";
 
 export default function WorkPage() {
-  const { data, isLoading } = useTasks();
+  // C1: the diary day is resolved client-side and always transmitted.
+  const { data, isLoading } = useTasks(localToday());
   const { create, setStatus, defer } = useTaskMutations();
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
@@ -43,9 +45,29 @@ export default function WorkPage() {
         <button className="btn btn-accent" disabled={create.isPending}>Add</button>
       </form>
 
-      <Bucket title={`Overdue · ${data?.overdue.length ?? 0}`} tasks={data?.overdue} tone="var(--bad)" onDone={(id) => setStatus.mutate({ id, status: "done" })} onDefer={(id) => defer.mutate({ id, newDueDate: tomorrow() })} />
-      <Bucket title={`Today · ${data?.today.length ?? 0}`} tasks={data?.today} onDone={(id) => setStatus.mutate({ id, status: "done" })} onDefer={(id) => defer.mutate({ id, newDueDate: tomorrow() })} />
-      <Bucket title={`Inbox · ${data?.inbox.length ?? 0}`} tasks={data?.inbox} onDone={(id) => setStatus.mutate({ id, status: "done" })} onDefer={(id) => defer.mutate({ id, newDueDate: tomorrow() })} />
+      <Bucket
+        title={`Overdue · ${data?.overdue.length ?? 0}`}
+        tone="var(--bad)"
+        tasks={data?.overdue}
+        status={defer || setStatus}
+        onDone={(id) => setStatus.mutate({ id, status: "done" })}
+        onDefer={(id) => defer.mutate({ id, newDueDate: tomorrow() })}
+      />
+      <Bucket
+        title={`Today · ${data?.today.length ?? 0}`}
+        tasks={data?.today}
+        status={defer || setStatus}
+        onDone={(id) => setStatus.mutate({ id, status: "done" })}
+        onDefer={(id) => defer.mutate({ id, newDueDate: tomorrow() })}
+      />
+      <Bucket
+        title={`Inbox · ${data?.inbox.length ?? 0}`}
+        tasks={data?.inbox}
+        status={defer || setStatus}
+        onDone={(id) => setStatus.mutate({ id, status: "done" })}
+        onDefer={(id) => defer.mutate({ id, newDueDate: tomorrow() })}
+      />
+      <OpStatus mutation={create} labels={{ saved: "Task added", pending: "Adding… queued" }} />
 
       <details>
         <summary className="text-xs cursor-pointer" style={{ color: "var(--faint)" }}>
@@ -75,20 +97,23 @@ function tomorrow(): string {
 }
 
 function Bucket({
-  title, tasks, tone, onDone, onDefer,
+  title, tasks, tone, onDone, onDefer, status,
 }: {
   title: string;
   tasks?: Array<{ id: string; title: string; dueDate: string | null; deferredCount: number; estimateMin: number | null }>;
   tone?: string;
+  status: Parameters<typeof OpStatus>[0]["mutation"];
   onDone: (id: string) => void;
   onDefer: (id: string) => void;
 }) {
-  void api;
   return (
     <section className="panel rounded p-4">
-      <h2 className="text-xs uppercase tracking-wider mb-2 num" style={{ color: tone ?? "var(--faint)" }}>
-        {title}
-      </h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xs uppercase tracking-wider num" style={{ color: tone ?? "var(--faint)" }}>
+          {title}
+        </h2>
+        <OpStatus mutation={status} labels={{ saved: "Saved", pending: "Queued" }} />
+      </div>
       {(tasks?.length ?? 0) === 0 ? (
         <p className="text-xs" style={{ color: "var(--faint)" }}>Empty.</p>
       ) : (
@@ -113,4 +138,4 @@ function Bucket({
   );
 }
 
-void deviceTimezone;
+void localToday;

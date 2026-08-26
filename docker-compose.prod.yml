@@ -1,0 +1,58 @@
+# Production self-host stack (genuinely runnable — §15 parity commitment).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Required environment (or a .env beside this file):
+#   APP_SECRET   64-hex  -> openssl rand -hex 32
+#   SETUP_TOKEN          -> openssl rand -hex 24   (delete after first bootstrap)
+#
+# App:    http://localhost:3000  (first run -> /bootstrap)
+# Migrations run automatically in a one-shot container before app start.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pos}
+      POSTGRES_DB: pos
+    volumes:
+      - pos_prod_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pos"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    build:
+      context: .
+      target: migrator
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-pos}@db:5432/pos
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-pos}@db:5432/pos
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+      SETUP_TOKEN: ${SETUP_TOKEN:-bootstrap-then-remove-me-0123456789}
+      CRON_SECRET: ${CRON_SECRET:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+
+volumes:
+  pos_prod_pgdata:

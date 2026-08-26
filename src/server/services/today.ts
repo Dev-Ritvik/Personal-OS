@@ -4,7 +4,7 @@ import {
   totalCategorized,
 } from "@/lib/metrics/facts";
 import { executionRate } from "@/lib/metrics/execution";
-import { unknownTimeShare, degradedConfidence } from "@/lib/metrics/unknownTime";
+import { unknownTimeShare, degradedConfidence, type ConfidenceDay } from "@/lib/metrics/unknownTime";
 import {
   planActualVariance,
   overplanningRatio,
@@ -12,8 +12,9 @@ import {
 } from "@/lib/metrics/variance";
 import { consistencyScore } from "@/lib/metrics/execution";
 import { postponeSummary } from "@/lib/metrics/postponement";
-import { goalPace } from "@/lib/metrics/goalPace";
-import { addDays, dateRange, diffDays, todayInTz } from "@/lib/metrics/dates";
+import { goalPace, M11 } from "@/lib/metrics/goalPace";
+import { METRIC_REGISTRY } from "@/lib/metrics/registry";
+import { addDays, dateRange, diffDays, localDateInTz, todayInTz } from "@/lib/metrics/dates";
 import { ensurePlanRange, listForDate } from "./plans";
 import { runningTimer } from "./timeEntries";
 import { loadRawInputs } from "./factsSource";
@@ -70,11 +71,13 @@ export async function assembleToday(
     (t) => t.dueDate && t.dueDate.toISOString().slice(0, 10) < today,
   );
 
-  const shares5 = facts.slice(-5).map((f) =>
-    unknownTimeShare(f).status === "ok"
-      ? (unknownTimeShare(f).value as number)
-      : -1,
-  );
+  // C3: explicit confidence contract — insufficient days are a distinct state.
+  const confidenceDays = facts.slice(-5).map((f): ConfidenceDay => {
+    const r = unknownTimeShare(f);
+    return r.status === "ok"
+      ? { kind: "observed", share: r.value! }
+      : { kind: "insufficient" };
+  });
 
   // Goal pace for active measurable goals (worst first, max 3 shown).
   const goals = await prisma.goal.findMany({
@@ -99,7 +102,7 @@ export async function assembleToday(
     if (remainingDays === null) continue;
     const ageDays = startDate
       ? Math.max(0, diffDays(today, startDate))
-      : Math.max(0, diffDays(today, g.createdAt.toISOString().slice(0, 10)));
+      : Math.max(0, diffDays(today, localDateInTz(g.createdAt, tz)));
     const pace = goalPace({
       remainingUnits,
       remainingDays,
@@ -111,11 +114,29 @@ export async function assembleToday(
         goalId: g.id,
         title: g.title,
         unit: g.unit ?? "units",
-        ...pace.value!,
+        // AC15 remediation: pace ships as a full MetricResult so the UI can
+        // render formula/epistemic/gates exactly like every other metric.
+        result: {
+          status: "ok",
+          value: pace.value!.pace,
+          gates: pace.gates,
+          meta: {
+            key: "m11_goal_pace",
+            label: `Goal pace — ${g.title}`,
+            formula: M11.formula,
+            epistemic: M11.epistemic,
+            interpretation: M11.interpretation,
+            limitation: M11.limitation,
+          },
+        },
+        requiredVelocityPerDay: pace.value!.requiredVelocityPerDay,
+        observedVelocityPerDay: pace.value!.observedVelocityPerDay,
       });
     }
   }
-  paceResults.sort((a, b) => a.pace - b.pace);
+  paceResults.sort(
+    (a, b) => (a.result.value ?? 1) - (b.result.value ?? 1),
+  );
 
   return {
     today,
@@ -169,7 +190,7 @@ export async function assembleToday(
         openTaskRows.map((t) => ({ id: t.id, deferredCount: t.deferredCount })),
       ),
       unknownTimeShareToday: unknownTimeShare(factToday),
-      degradedConfidence: degradedConfidence(shares5.map((s) => s)),
+      degradedConfidence: degradedConfidence(confidenceDays),
     },
     goalPace: paceResults.slice(0, 3),
     flags: buildFlags({
@@ -209,25 +230,26 @@ interface FlagInput {
   variance: ReturnType<typeof planActualVariance>;
   postpone: ReturnType<typeof postponeSummary>;
   overdueCount: number;
-  paceWorst?: { title: string; pace: number; requiredVelocityPerDay: number; observedVelocityPerDay: number };
+  paceWorst?: {
+    title: string;
+    result: { value?: number };
+    requiredVelocityPerDay: number;
+    observedVelocityPerDay: number;
+  };
 }
 
-/** Evidence-first flag row; neutral phrasing only (P-8, §9.2). */
-function buildFlags(i: FlagInput): Array<{
+interface Flag {
   key: string;
   severity: "info" | "warning";
   message: string;
   evidence: Record<string, number | string | null>;
-}> {
-  const flags: FlagInput extends never ? never : Array<ReturnType<typeof mkFlag>> = [];
-  function mkFlag(x: {
-    key: string;
-    severity: "info" | "warning";
-    message: string;
-    evidence: Record<string, number | string | null>;
-  }) {
-    return x;
-  }
+}
+
+/** Evidence-first flag row; neutral phrasing only (P-8, §9.2). AC15: computed
+ *  signals cite their metric formula inline in evidence. */
+function buildFlags(i: FlagInput): Flag[] {
+  const flags: Flag[] = [];
+  const mkFlag = (x: Flag): Flag => x;
 
   if (i.postpone.status === "ok" && i.postpone.value!.chronicCount > 0) {
     flags.push(
@@ -235,7 +257,12 @@ function buildFlags(i: FlagInput): Array<{
         key: "chronic_deferral",
         severity: "warning",
         message: `${i.postpone.value!.chronicCount} task(s) deferred ≥3 times`,
-        evidence: { chronic_count: i.postpone.value!.chronicCount, max_depth: i.postpone.value!.maxDepth },
+        evidence: {
+          chronic_count: i.postpone.value!.chronicCount,
+          max_depth: i.postpone.value!.maxDepth,
+          metric: "m5_postponement_depth",
+          formula: METRIC_REGISTRY.m5_postponement_depth?.formula ?? null,
+        },
       }),
     );
   }
@@ -264,6 +291,8 @@ function buildFlags(i: FlagInput): Array<{
           variance_minutes: i.variance.value!.minutes,
           pct: Math.round((i.variance.value!.pct ?? 0) * 100),
           n_days: i.variance.gates[0]?.observed ?? null,
+          metric: "m3_plan_actual_variance",
+          formula: METRIC_REGISTRY.m3_plan_actual_variance?.formula ?? null,
         },
       }),
     );
@@ -274,20 +303,27 @@ function buildFlags(i: FlagInput): Array<{
         key: "observability_gap",
         severity: "info",
         message: `${Math.round(i.unknownShare.value! * 100)}% of today's waking time is unlogged`,
-        evidence: { unknown_share: Math.round(i.unknownShare.value! * 100) },
+        evidence: {
+          unknown_share: Math.round(i.unknownShare.value! * 100),
+          metric: "m4_unknown_time_share",
+          formula: METRIC_REGISTRY.m4_unknown_time_share?.formula ?? null,
+        },
       }),
     );
   }
-  if (i.paceWorst && i.paceWorst.pace < 0.8) {
+  const worstPace = i.paceWorst?.result.value;
+  if (i.paceWorst && worstPace !== undefined && worstPace < 0.8) {
     flags.push(
       mkFlag({
         key: "goal_behind_pace",
         severity: "warning",
         message: `"${i.paceWorst.title}" behind pace`,
         evidence: {
-          pace: Math.round(i.paceWorst.pace * 100) / 100,
+          pace: Math.round(worstPace * 100) / 100,
           required_per_day: Math.round(i.paceWorst.requiredVelocityPerDay * 100) / 100,
           observed_per_day: Math.round(i.paceWorst.observedVelocityPerDay * 100) / 100,
+          metric: "m11_goal_pace",
+          formula: METRIC_REGISTRY.m11_goal_pace?.formula ?? null,
         },
       }),
     );

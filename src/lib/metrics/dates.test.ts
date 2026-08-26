@@ -5,6 +5,7 @@ import {
   diffDays,
   isValidLocalDate,
   localDateInTz,
+  todayInTz,
   tzOffsetMinutes,
   zonedWallTimeToUtc,
 } from "./dates";
@@ -84,6 +85,28 @@ describe("zonedWallTimeToUtc", () => {
     expect(start.toISOString()).toBe("2026-03-08T11:00:00.000Z"); // EDT
     expect(end.toISOString()).toBe("2026-03-09T03:00:00.000Z");   // EDT
     expect(localDateInTz(end, NY)).toBe("2026-03-08");
+  });
+});
+
+describe("todayInTz (C2 — authoritative local today)", () => {
+  it("UTC+ user is on the next day while UTC still shows yesterday", () => {
+    const instant = new Date("2026-06-15T17:30:00Z"); // 23:00 Tokyo, 13:30 NY
+    expect(todayInTz("Asia/Tokyo", instant)).toBe("2026-06-16");
+    expect(todayInTz("America/New_York", instant)).toBe("2026-06-15");
+    expect(todayInTz("UTC", instant)).toBe("2026-06-15");
+  });
+
+  it("UTC− user is on the previous day late in the UTC day", () => {
+    const instant = new Date("2026-06-15T03:00:00Z"); // 23:00 NY (06-14? No: 03:00Z=23:00 EDT 06-14? EDT−4 → 06-14 23:00)
+    expect(todayInTz("America/New_York", instant)).toBe("2026-06-14");
+    expect(todayInTz("UTC", instant)).toBe("2026-06-15");
+    // UTC+14 (Kiritimati) already tomorrow.
+    expect(todayInTz("Pacific/Kiritimati", instant)).toBe("2026-06-15"); // 17:00 same day
+  });
+
+  it("midnight crossing both directions", () => {
+    expect(todayInTz("UTC", new Date("2026-06-15T23:59:59Z"))).toBe("2026-06-15");
+    expect(todayInTz("UTC", new Date("2026-06-16T00:00:00Z"))).toBe("2026-06-16");
   });
 });
 

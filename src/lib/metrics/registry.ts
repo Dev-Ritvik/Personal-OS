@@ -1,5 +1,5 @@
 import type { MetricMeta } from "./types";
-import { M1, M2 } from "./execution";
+import { M1, M2, M10 } from "./execution";
 import { M3, M8, M9 } from "./variance";
 import { M4 } from "./unknownTime";
 import { M5, M6 } from "./postponement";
@@ -10,7 +10,7 @@ import { M11 } from "./goalPace";
  * from here so no number can appear on screen without its definition (AC15).
  */
 export const METRIC_REGISTRY: Record<string, MetricMeta> = Object.fromEntries(
-  [M1, M2, M3, M4, M5, M6, M8, M9, M11].map((m) => [m.key, m]),
+  [M1, M2, M3, M4, M5, M6, M8, M9, M10, M11].map((m) => [m.key, m]),
 );
 
 export const METRIC_LABELS_BY_KEY: Record<string, string> = {

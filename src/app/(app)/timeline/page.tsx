@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useEntries } from "@/lib/client/hooks";
-import { deviceTimezone } from "@/lib/client/api";
+import { localToday } from "@/lib/client/api";
 
 const VALUE_CLASS_COLOR: Record<string, string> = {
   productive: "var(--accent)",
@@ -14,9 +14,9 @@ const VALUE_CLASS_COLOR: Record<string, string> = {
 
 /** Day-level timeline (P0 read view): waking bar, entries ledger, gaps visible. */
 export default function TimelinePage() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // C2: diary day resolved in the device tz, never server-UTC.
+  const [date, setDate] = useState(() => localToday());
   const entries = useEntries(date);
-  void deviceTimezone;
 
   const rows = entries.data ?? [];
   const live = rows.filter((r) => !r.voidedAt);

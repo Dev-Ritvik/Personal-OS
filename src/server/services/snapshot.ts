@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { Prisma } from "@prisma/client";
 import { buildDayFacts, totalCategorized } from "@/lib/metrics/facts";
 import { unknownTimeShare } from "@/lib/metrics/unknownTime";
 import { computeGoalProgress } from "@/lib/goals/progress";
@@ -56,7 +57,8 @@ export async function persistSnapshots(
 
   let daysWritten = 0;
 
-  // Overdue-as-of-date: needs full task lifecycle inside the window.
+  // Overdue-as-of-date. Bounded (perf remediation): only tasks whose
+  // completion could fall inside the window are loaded.
   const fromD = new Date(`${fromDate}T00:00:00Z`);
   const toD = new Date(`${toDate}T00:00:00Z`);
   const [openAll, doneInRange] = await Promise.all([
@@ -69,12 +71,14 @@ export async function persistSnapshots(
         userId: user.id,
         deletedAt: null,
         status: { in: ["done", "cancelled"] },
-        completedAt: { not: null },
+        completedAt: {
+          gte: new Date(fromD.getTime() - 36 * 3600_000),
+          lte: new Date(toD.getTime() + 12 * 3600_000),
+        },
       },
       select: { dueDate: true, completedAt: true },
     }),
   ]);
-  void toD;
   const overdueCountByDate = new Map<string, number>();
   for (const date of dates) {
     const d = new Date(`${date}T00:00:00Z`);
@@ -93,13 +97,17 @@ export async function persistSnapshots(
     overdueCountByDate.set(date, n);
   }
 
+  // Batched recompute (perf remediation): one delete + one create per chunk
+  // replaces ~10 sequential upserts per day. Recompute semantics preserved —
+  // the range is fully rewritten each run.
+  const rows: Array<{
+    metricKey: string;
+    localDate: Date;
+    value: number;
+    payload?: object;
+    computedAt: Date;
+  }> = [];
   for (const fact of facts) {
-    const rows: Array<{
-      metricKey: string;
-      localDate: Date;
-      value: number;
-      payload?: object;
-    }> = [];
     for (const key of DAY_FACT_KEYS) {
       const v = factValue(fact, key);
       // Convention: value −1 with payload.missing=true means "no observation"
@@ -114,28 +122,33 @@ export async function persistSnapshots(
             : key === "productive_minutes" || key === "unknown_share"
               ? { totalCategorized: Math.round(totalCategorized(fact)) }
               : undefined,
+        computedAt: new Date(),
       });
     }
     rows.push({
       metricKey: "overdue_count",
       localDate: new Date(`${fact.date}T00:00:00Z`),
       value: overdueCountByDate.get(fact.date) ?? 0,
+      computedAt: new Date(),
     });
-    await prisma.$transaction(
-      rows.map((r) =>
-        prisma.metricSnapshot.upsert({
-          where: {
-            metricKey_localDate: {
-              metricKey: r.metricKey,
-              localDate: r.localDate,
-            },
-          },
-          create: { ...r, computedAt: new Date() },
-          update: { value: r.value ?? -1, payload: r.payload, computedAt: new Date() },
-        }),
-      ),
-    );
-    daysWritten++;
+  }
+
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    await prisma.$transaction([
+      prisma.metricSnapshot.deleteMany({
+        where: {
+          localDate: { gte: fromD, lte: toD },
+          metricKey: { in: chunk.map((r) => r.metricKey) },
+          // Only rewrite day-fact/overdue keys here; goal_progress series
+          // is owned by the goal loop below.
+          NOT: { metricKey: { startsWith: "goal_progress:" } },
+        },
+      }),
+      prisma.metricSnapshot.createMany({ data: chunk }),
+    ]);
+    daysWritten += new Set(chunk.map((r) => r.localDate.toISOString())).size;
   }
 
   // Goal-progress series feeding M11 gates.
@@ -205,7 +218,25 @@ export async function persistSnapshots(
     goalSeriesWritten++;
   }
 
+  // §14 retention: sync_ops older than 90 days are pruned on the nightly run.
+  await pruneSyncOps();
+
   return { daysWritten, goalSeriesWritten };
+}
+
+/** 90-day sync_ops retention (§14). Recent ops — the only ones clients may
+ *  still replay — are untouched, so idempotency guarantees hold. */
+export async function pruneSyncOps(): Promise<number> {
+  const cutoff = new Date(Date.now() - 90 * 24 * 3600_000);
+  const res = await prisma.syncOp.deleteMany({
+    where: {
+      receivedAt: { lt: cutoff },
+      // Never delete an op that has not produced its response yet: it may
+      // still be pending on a client queue.
+      NOT: { response: { equals: Prisma.AnyNull } },
+    },
+  });
+  return res.count;
 }
 
 /** Progress observations for M11 from the snapshot series (+ today's live point). */

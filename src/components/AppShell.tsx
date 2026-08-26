@@ -63,7 +63,7 @@ export function AppShell({
 
       {/* Mobile bottom tabs */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex border-t h-14 items-stretch"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex border-t h-14 items-stretch safe-bottom"
         style={{ background: "var(--panel)" }}
       >
         {[NAV[0], NAV[1], NAV[3], NAV[2], NAV[6]].map((n) => (

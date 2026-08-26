@@ -5,10 +5,26 @@
  */
 const BASE = process.env.SMOKE_BASE_URL ?? "http://localhost:3000";
 import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { Secret, TOTP } from "otpauth";
+
+// Fresh-database guarantee unless explicitly disabled. The suite's scenario
+// (bootstrap → confirm → …) only makes sense from an empty instance.
+if (process.env.SMOKE_RESET !== "0") {
+  const TABLES = "users, sessions, categories, category_history, goals, behaviors, tasks, plan_instances, time_entries, measurements, events, reflections, metric_snapshots, intervention_log, audit_log, sync_ops";
+  try {
+    execSync(`docker exec pos-db-dev psql -U postgres -d pos -c "TRUNCATE ${TABLES} CASCADE"`, { stdio: "ignore" });
+  } catch {
+    console.error("NOTE: could not auto-reset DB (docker/pos-db-dev unavailable?) — continuing against current state.");
+  }
+}
 
 let cookie = "";
 let failures = 0;
+
+// Unique per-run source address so the server's in-memory rate-limit buckets
+// never leak state between consecutive smoke runs.
+const RUN_IP = `10.10.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}`;
 
 function check(name, cond, detail = "") {
   if (cond) console.log(`  ok  ${name}`);
@@ -24,6 +40,7 @@ async function req(method, path, body, opts = {}) {
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
       ...(cookie ? { cookie } : {}),
+      "x-forwarded-for": opts.ip ?? RUN_IP,
       ...(opts.headers ?? {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -67,7 +84,12 @@ async function main() {
   const dup = await req("POST", "/api/bootstrap", {
     setupToken, email: "x@y.test", password: "correct-horse-battery", timezone: "UTC",
   });
-  check("second bootstrap → 409 already_bootstrapped", dup.json?.error?.code === "already_bootstrapped", JSON.stringify(dup.json));
+  // C5: pre-confirmation, a token-gated retry RECOVERS (rotates the secret).
+  check(
+    "pre-confirmation re-bootstrap recovers + rotates secret",
+    dup.json?.kind === "recovered" && dup.json?.totpSecret !== secret,
+    JSON.stringify(dup.json)?.slice(0, 160),
+  );
 
   const badTok = await req("POST", "/api/bootstrap", {
     setupToken: "wrong-token-wrong-token-wrong",
@@ -75,8 +97,11 @@ async function main() {
   });
   check("bad setup token → 403", badTok.status === 403, JSON.stringify(badTok.json));
 
+  /* confirm TOTP using the LATEST (recovered) secret → session */
+  const activeSecret = dup.json.totpSecret;
+
   /* confirm TOTP → session */
-  const totp = new TOTP({ secret: Secret.fromBase32(secret), digits: 6, period: 30, algorithm: "SHA1" });
+  const totp = new TOTP({ secret: Secret.fromBase32(activeSecret), digits: 6, period: 30, algorithm: "SHA1" });
   const cf = await req("POST", "/api/bootstrap/confirm", { code: totp.generate() });
   check("bootstrap confirm sets session", cf.status === 200 && cookie.includes("pos_session"), JSON.stringify(cf.json));
 
@@ -136,6 +161,19 @@ async function main() {
   });
   check("quick-log created", ql.json?.data?.durationSec === 1800);
 
+  /* C6: offline-style stop carries the client stop instant */
+  const st2 = await req("POST", "/api/timer", { action: "start", deviceTz: "America/New_York" });
+  const pastStop = new Date(Date.parse(st2.json.data.startedAt) + 5 * 60_000).toISOString();
+  const sp2 = await req("POST", "/api/timer", {
+    action: "stop",
+    stoppedAt: pastStop,
+  });
+  check(
+    "carried stop instant yields exact duration (not server-now)",
+    Math.abs(sp2.json?.data?.durationSec - 300) <= 1,
+    JSON.stringify(sp2.json),
+  );
+
   /* correction protocol: amend voids original, links sibling (AC10) */
   const am = await req("POST", `/api/time-entries/${ql.json.data.id}`, {
     durationMin: 45,
@@ -191,6 +229,43 @@ async function main() {
     "export includes timeEntries & behaviors & tasks",
     exported?.counts?.timeEntries >= 1 && exported?.counts?.behaviors >= 1 && exported?.counts?.tasks >= 1,
     JSON.stringify(exported?.counts),
+  );
+  check("export includes audit trail (C8)", exported?.counts?.auditLog >= 1);
+  const rawExport = JSON.stringify(exported);
+  check(
+    "export leaks no credential material (C8)",
+    !/passwordHash.*\$s\d|totpSecretEnc|totp_secret_enc/.test(rawExport),
+  );
+
+  /* C1: buckets arrive tz-resolved from the client's diary day */
+  const nyToday = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const tk = await req("GET", `/api/tasks?date=${nyToday}`);
+  check("tasks endpoint returns resolved buckets", Array.isArray(tk.json?.data?.overdue));
+
+  /* bootstrap rate limit (C5): dedicated bucket, expect a 429 within 6 tries */
+  const RL_IP = "203.0.113.7";
+  let saw429 = false;
+  for (let i = 0; i < 6; i++) {
+    const r = await req("POST", "/api/bootstrap", {
+      setupToken: "deliberately-wrong-token-value",
+      email: `rl-${i}@local.test`,
+      password: "correct-horse-battery",
+      timezone: "UTC",
+    }, { ip: RL_IP, captureCookie: false });
+    if (r.status === 429) { saw429 = true; break; }
+  }
+  check("bootstrap POST rate-limits abusive attempts (C5/§15)", saw429);
+
+  /* confirmed account must NOT re-enter bootstrap/recovery */
+  const reentry = await req("POST", "/api/bootstrap", {
+    setupToken, email: "again@local.test", password: "correct-horse-battery", timezone: "UTC",
+  });
+  check(
+    "post-confirmation bootstrap refuses (already_bootstrapped)",
+    reentry.json?.error?.code === "already_bootstrapped",
+    JSON.stringify(reentry.json)?.slice(0, 140),
   );
 
   console.log(failures === 0 ? "\nALL SMOKE CHECKS PASSED" : `\n${failures} SMOKE CHECKS FAILED`);

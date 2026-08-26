@@ -25,6 +25,9 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Standalone output powers the production Docker image (self-host parity).
+  // Vercel ignores it and uses its own builder.
+  output: "standalone",
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

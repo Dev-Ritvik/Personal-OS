@@ -53,4 +53,9 @@ test("bootstrap, land on Today, quick-log time", async ({ page }) => {
   await page.getByRole("button", { name: "Log time" }).click();
 
   await expect(page.locator("main")).not.toContainText("Failed to load today");
+
+  // AC15 remediation: every metric tile exposes its formula on interaction.
+  const tile = page.locator("details.panel").first();
+  await tile.locator("summary").click();
+  await expect(tile.getByText("Formula")).toBeVisible();
 });

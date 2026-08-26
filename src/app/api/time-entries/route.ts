@@ -1,6 +1,7 @@
 import { handle, idempotent, json, requireSession } from "@/server/api";
 import { quickLog } from "@/server/validation";
 import { quickLog as quickLogSvc, entriesForDate } from "@/server/services/timeEntries";
+import { todayInTz } from "@/lib/metrics/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +10,7 @@ export const GET = handle(async (req: Request) => {
   const s = await requireSession();
   const url = new URL(req.url);
   const date =
-    url.searchParams.get("date") ??
-    new Date().toISOString().slice(0, 10);
+    url.searchParams.get("date") ?? todayInTz(url.searchParams.get("deviceTz") ?? s.timezone);
   return json({
     data: await entriesForDate(
       { userId: s.id, profileTz: s.timezone, deviceTz: url.searchParams.get("deviceTz") ?? undefined },

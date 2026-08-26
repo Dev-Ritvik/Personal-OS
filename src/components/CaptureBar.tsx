@@ -8,6 +8,7 @@ import {
   useTimerActions,
   useTimer,
 } from "@/lib/client/hooks";
+import { OpStatus } from "./OpStatus";
 
 function elapsed(startedAt: string): string {
   const s = Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000));
@@ -65,6 +66,7 @@ export function CaptureBar({ compact = false }: { compact?: boolean }) {
             <button className="btn" disabled={busy} onClick={() => stop.mutate()}>
               Stop
             </button>
+            <OpStatus mutation={stop} labels={{ saved: "Stopped", pending: "Stop queued" }} />
           </>
         ) : (
           <>
@@ -80,6 +82,7 @@ export function CaptureBar({ compact = false }: { compact?: boolean }) {
             >
               ▶ Start timer
             </button>
+            <OpStatus mutation={start} />
             {!compact && (
               <span className="text-2xs" style={{ color: "var(--faint)" }}>
                 exact instants; survives reload & device switch
@@ -140,6 +143,10 @@ export function CaptureBar({ compact = false }: { compact?: boolean }) {
         >
           Log time
         </button>
+        <OpStatus
+          mutation={quickLog}
+          labels={{ saved: "Logged", pending: "Queued", failed: "Failed — retry" }}
+        />
       </div>
     </div>
   );

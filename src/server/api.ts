@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { uuidv7 } from "./ids";
 import { getSessionUser, type SessionUser } from "./auth/session";
@@ -68,9 +69,28 @@ export async function requireSession(): Promise<SessionUser> {
 }
 
 /**
- * Idempotent command execution via sync_ops (ARCHITECTURE.md §14).
- * Replaying the same clientOpId returns the ORIGINAL response with
- * `x-idempotent-replay: true` — five retries never create five records.
+ * How long a response-less reservation is considered "in flight" before a
+ * retry may take it over. Handlers here are sub-second; 120s is generous.
+ * This bounds the crash window (C4): an operation can never be wedged longer
+ * than the TTL, because any later retry claims the stale reservation and
+ * re-executes deterministically.
+ */
+export const IDEMPOTENCY_TTL_MS = 120_000;
+
+/**
+ * Idempotent command execution via sync_ops (ARCHITECTURE.md §14, remediated C4).
+ *
+ * Lifecycle:
+ *   reserve (insert, response=null)
+ *     ├─ handler ok    → store response            → later calls REPLAY
+ *     ├─ handler threw → delete reservation        → retry re-executes cleanly
+ *     └─ process died  → reservation ages out      → after TTL any retry takes
+ *                                                   over (atomic conditional
+ *                                                   update) and re-executes
+ * Duplicate while live → 409 op_in_flight (transient; clients retry).
+ * Deterministic failures are never recorded → retrying is always safe.
+ *
+ * Cross-user collision on clientOpId is rejected outright.
  */
 export async function idempotent<T>(
   userId: string,
@@ -82,29 +102,59 @@ export async function idempotent<T>(
     return { result: await handler(), replayed: false };
   }
 
-  const opId = uuidv7();
-  try {
-    await prisma.syncOp.create({
-      data: { id: opId, userId, clientOpId, op: { desc: opDesc } },
-    });
-  } catch {
-    const existing = await prisma.syncOp.findUnique({ where: { clientOpId } });
-    if (existing?.response !== null && existing?.response !== undefined) {
-      return {
-        result: existing.response as T,
-        replayed: true,
-      };
+  const existing = await prisma.syncOp.findUnique({ where: { clientOpId } });
+
+  if (existing) {
+    if (existing.userId !== userId) {
+      throw new ApiError(409, "op_owner_conflict", "clientOpId belongs to another principal");
     }
-    // Recorded but no stored response (crash window): treat as conflict.
-    throw new ApiError(409, "op_in_flight", "Operation already recorded; retry shortly");
+    if (existing.response !== null && existing.response !== undefined) {
+      return { result: existing.response as T, replayed: true };
+    }
+    const ageMs = Date.now() - existing.receivedAt.getTime();
+    if (ageMs < IDEMPOTENCY_TTL_MS) {
+      throw new ApiError(409, "op_in_flight", "Operation already in progress; retry shortly");
+    }
+    // Stale reservation (crashed process): atomically claim it.
+    const claimed = await prisma.syncOp.updateMany({
+      where: { clientOpId, response: { equals: Prisma.AnyNull } },
+      data: { receivedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      throw new ApiError(409, "op_in_flight", "Operation already in progress; retry shortly");
+    }
+  } else {
+    try {
+      await prisma.syncOp.create({
+        data: { id: uuidv7(), userId, clientOpId, op: { desc: opDesc } },
+      });
+    } catch {
+      // Lost a create race — re-read and classify.
+      const cur = await prisma.syncOp.findUnique({ where: { clientOpId } });
+      if (!cur || cur.userId !== userId) {
+        throw new ApiError(409, "op_owner_conflict", "clientOpId belongs to another principal");
+      }
+      if (cur.response !== null && cur.response !== undefined) {
+        return { result: cur.response as T, replayed: true };
+      }
+      throw new ApiError(409, "op_in_flight", "Operation already in progress; retry shortly");
+    }
   }
 
-  const result = await handler();
-  await prisma.syncOp.update({
-    where: { clientOpId },
-    data: { response: result as object },
-  });
-  return { result, replayed: false };
+  try {
+    const result = await handler();
+    await prisma.syncOp.update({
+      where: { clientOpId },
+      data: { response: result as object },
+    });
+    return { result, replayed: false };
+  } catch (err) {
+    // Never leave a poisoned reservation behind: the op is retryable as-is.
+    await prisma.syncOp
+      .deleteMany({ where: { clientOpId, response: { equals: Prisma.AnyNull } } })
+      .catch(() => undefined);
+    throw err;
+  }
 }
 
 export async function audit(

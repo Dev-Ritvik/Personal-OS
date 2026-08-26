@@ -1,56 +1,50 @@
-import { prisma } from "@/server/db";
-import { ApiError, audit, handle, idempotent, json } from "@/server/api";
+import { handle, json } from "@/server/api";
 import { bootstrapInput } from "@/server/validation";
+import { createAccountOrRecover } from "@/server/services/bootstrap";
 import { hashPassword } from "@/server/auth/password";
-import { constantTimeEqual } from "@/server/auth/password";
-import { encryptSecret, generateTotpSecret, totpUri } from "@/server/auth/totp";
-import { uuidv7 } from "@/server/ids";
-import { ENV } from "@/server/env";
-import { seedDefaults } from "@/server/services/seed";
+import { clientIp, rateLimit } from "@/server/auth/ratelimit";
+import { prisma } from "@/server/db";
 
 export const dynamic = "force-dynamic";
 
 /** GET: does the instance still need its single account? */
 export async function GET() {
-  const count = await prisma.user.count();
-  return json({ needsSetup: count === 0 });
+  return handle(async () => {
+    const count = await prisma.user.count();
+    return json({ needsSetup: count === 0 });
+  })();
 }
 
-/** POST: one-time account creation, gated by SETUP_TOKEN. */
+/**
+ * POST: first-run setup OR pre-confirmation secret recovery (C5).
+ * Rate limited (5/min/IP) per §15; setup token constant-time compared inside.
+ */
 export const POST = handle(async (req: Request) => {
-  const body = await req.json();
-  const input = bootstrapInput.parse(body);
-
-  if (!constantTimeEqual(input.setupToken, ENV.SETUP_TOKEN)) {
-    throw new ApiError(403, "bad_setup_token", "Invalid setup token");
+  if (!rateLimit(`bootstrap:${clientIp(req)}`, 5)) {
+    return json(
+      { error: { code: "rate_limited", message: "Too many attempts; wait a minute" } },
+      { status: 429 },
+    );
   }
+  const raw = await req.json();
+  const input = bootstrapInput.parse(raw);
+  const passwordHash = await hashPassword(input.password);
 
-  const existing = await prisma.user.count();
-  if (existing > 0) {
-    throw new ApiError(409, "already_bootstrapped", "Account already exists");
-  }
-
-  const secret = generateTotpSecret();
-  const user = await prisma.user.create({
-    data: {
-      id: uuidv7(),
-      email: input.email.toLowerCase(),
-      passwordHash: await hashPassword(input.password),
-      totpSecretEnc: encryptSecret(secret),
-      timezone: input.timezone,
-    },
+  const result = await createAccountOrRecover({
+    setupToken: input.setupToken,
+    email: input.email,
+    passwordHash,
+    timezone: input.timezone,
   });
 
-  // Idempotency is meaningless here (single-shot), kept out of the path.
-  void idempotent;
-  await audit(user.id, "create", "user", user.id, null);
-  await seedDefaults(user.id);
-
   return json({
-    userId: user.id,
-    totpSecret: secret,
-    otpauthUri: totpUri(input.email, secret),
+    kind: result.kind,
+    userIdEmail: result.email,
+    totpSecret: result.totpSecret,
+    otpauthUri: result.otpauthUri,
     message:
-      "Add this secret to your authenticator app now, then confirm with a code.",
+      result.kind === "recovered"
+        ? "Previous authenticator secret is now invalid. Re-enroll with this one."
+        : "Add this secret to your authenticator app now, then confirm with a code.",
   });
 });

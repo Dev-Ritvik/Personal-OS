@@ -63,7 +63,9 @@ export interface TodayPayload {
   };
   goalPace: Array<{
     goalId: string; title: string; unit: string;
-    pace: number; requiredVelocityPerDay: number; observedVelocityPerDay: number; observationPoints: number;
+    result: MetricResultDto<number>;
+    requiredVelocityPerDay: number;
+    observedVelocityPerDay: number;
   }>;
   flags: Array<{ key: string; severity: "info" | "warning"; message: string; evidence: Record<string, string | number | null> }>;
 }
@@ -101,7 +103,7 @@ export function useToday() {
 }
 
 export function useTasks(date?: string) {
-  const q = date ? `?date=${date}` : "";
+  const q = date ? `?date=${date}&${tzParam()}` : `?${tzParam()}`;
   return useQuery({
     queryKey: ["tasks", date ?? "auto"],
     queryFn: () =>
@@ -200,7 +202,7 @@ export function useEntries(date: string) {
 export function useAnalytics(days: number) {
   return useQuery({
     queryKey: ["analytics", days],
-    queryFn: () => api<{ data: AnalyticsPayload }>(`/api/analytics?days=${days}`),
+    queryFn: () => api<{ data: AnalyticsPayload }>(`/api/analytics?days=${days}&${tzParam()}`),
     select: (r) => r.data,
   });
 }
@@ -237,8 +239,13 @@ export function useTimerActions() {
       api(`/api/timer`, { body: { action: "start", ...input, deviceTz: deviceTimezone() } }),
     onSuccess: () => invalidate("timer", "today", "entries"),
   });
+  // C6: the stop instant is captured on THIS device at press time, so an
+  // offline queue delay can never inflate the session.
   const stop = useMutation({
-    mutationFn: () => api(`/api/timer`, { body: { action: "stop" } }),
+    mutationFn: () =>
+      api(`/api/timer`, {
+        body: { action: "stop", stoppedAt: new Date().toISOString() },
+      }),
     onSuccess: () => invalidate("timer", "today", "entries"),
   });
   return { start, stop };
@@ -308,6 +315,13 @@ export function useSettingsPatch() {
     mutationFn: (body: { timezone?: string; wakingStartMin?: number; wakingEndMin?: number }) =>
       api(`/api/me`, { method: "PATCH", body }),
     onSuccess: () => invalidate("me"),
+  });
+}
+
+export function useDeleteAll() {
+  return useMutation({
+    mutationFn: (confirm: string) =>
+      api<{ ok: boolean }>("/api/me/delete-all", { body: { confirm } }),
   });
 }
 

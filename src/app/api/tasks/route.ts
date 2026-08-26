@@ -1,14 +1,17 @@
 import { handle, idempotent, json, requireSession } from "@/server/api";
 import { taskCreate } from "@/server/validation";
 import { createTask, listTasks } from "@/server/services/tasks";
+import { todayInTz } from "@/lib/metrics/dates";
 
 export const dynamic = "force-dynamic";
 
-/** GET grouped lists (?date=YYYY-MM-DD for the 'today' bucket). */
+/** GET grouped lists (?date=YYYY-MM-DD optional; defaults to caller's diary day). */
 export const GET = handle(async (req: Request) => {
   const s = await requireSession();
+  const url = new URL(req.url);
   const date =
-    new URL(req.url).searchParams.get("date") ?? undefined;
+    url.searchParams.get("date") ??
+    todayInTz(url.searchParams.get("deviceTz") ?? s.timezone);
   return json({ data: await listTasks(s.id, date) });
 });
 

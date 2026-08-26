@@ -30,12 +30,31 @@ Optional demo data: `pnpm db:seed` (requires bootstrapped account).
 
 | Command | What it proves |
 |---|---|
-| `pnpm test` | 55 metric-core unit tests: goldens, gates, missing≠zero, order invariance, DST/fold/gap |
+| `pnpm test` | unit (metric goldens, gates, DST) **and** integration suites; integration self-skips without a reachable test DB |
+| `pnpm test:integration` | creates `pos_test` in the dev Docker Postgres, pushes schema, runs DB-backed regression suites: idempotency lifecycle, tz-aware task buckets, offline-safe timer stop, bootstrap recovery, frozen completion dates, export completeness, deletion, sync retention |
 | `pnpm typecheck` | strict TS across server+client |
 | `pnpm lint` | ESLint clean |
-| `pnpm build` | production compile |
-| `bash scripts/reset-db.sh && node scripts/smoke.mjs` | 24 live API checks incl. auth+TOTP, idempotent replay (`x-idempotent-replay`), AC1/AC3/AC10/AC12/AC15 |
-| `E2E_BASE_URL=http://localhost:3000 pnpm exec playwright test` | full browser journey: bootstrap→Today→quick-log |
+| `pnpm build` | production compile (+standalone output for Docker) |
+| `bash scripts/reset-db.sh && node scripts/smoke.mjs` | live API checks incl. auth+TOTP, idempotent replay, carried timer-stop instants, AC1/AC3/AC10/AC12/AC15, bootstrap rate-limit trip |
+| `E2E_BASE_URL=http://localhost:3000 pnpm exec playwright test` | full browser journey incl. metric formula popover (AC15) |
+| `pnpm perf` | seeds 90 days and measures Today p50/p95/p99 — informational only; AC13 requires production-like measurement |
+
+## Self-hosting (production compose)
+
+```bash
+APP_SECRET=$(openssl rand -hex 32) SETUP_TOKEN=$(openssl rand -hex 24) \
+  docker compose -f docker-compose.prod.yml up -d --build
+# open http://localhost:3000/bootstrap, use SETUP_TOKEN, then remove it from the env
+```
+
+The stack runs Postgres 16, a one-shot migration container (`prisma migrate deploy`), and the Next standalone server with a healthcheck. Backups:
+
+```bash
+DATABASE_URL=... pnpm backup            # local pg_dump + retention
+BACKUP_UPLOAD_CMD='rclone copy {} remote:pos-backups' DATABASE_URL=... pnpm backup
+```
+
+The script performs a real custom-format dump; offsite upload happens only via `BACKUP_UPLOAD_CMD`, and provider-managed PITR remains your responsibility to configure.
 
 ## Deploying to Vercel + Supabase (U1)
 

@@ -1,5 +1,5 @@
 import { buildDayFacts } from "@/lib/metrics/facts";
-import { dateRange } from "@/lib/metrics/dates";
+import { addDays, dateRange, todayInTz } from "@/lib/metrics/dates";
 import { loadRawInputs } from "@/server/services/factsSource";
 import {
   consistencyScore,
@@ -25,11 +25,10 @@ export const GET = handle(async (req: Request) => {
   const s = await requireSession();
   const url = new URL(req.url);
   const days = Math.min(120, Math.max(7, Number(url.searchParams.get("days") ?? "30") || 30));
-  const today = new Date().toISOString().slice(0, 10);
-  const dates = dateRange(
-    new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10),
-    today,
-  );
+  // C2: the diary day resolves in the caller's timezone, never server-UTC.
+  const deviceTz = url.searchParams.get("deviceTz");
+  const today = todayInTz(deviceTz ?? s.timezone);
+  const dates = dateRange(addDays(today, -(days - 1)), today);
 
   const raw = await loadRawInputs(s.id, dates, {
     timezone: s.timezone,

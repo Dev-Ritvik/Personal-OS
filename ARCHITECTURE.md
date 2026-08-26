@@ -341,7 +341,7 @@ Interpretation: chronic negative ⇒ planning optimism or avoidance (disambiguat
 
 **M7 Context-Switch Rate** — transitions/hour within logged activity, compared to trailing 28d personal baseline (relative z-ish score, not absolute claim). Limitation: log granularity bias — requires ≥2 entries/hr resolution days only. Gate: n≥10 qualifying days.
 
-**M8 Overplanning Ratio** — planned / trailing-28d-median-executed-productive-hours. Interpretation: sustained >1.4 = systematic optimism. Gate: 28d data.
+**M8 Overplanning Ratio** — mean(planned, last 7d) / median(productive-executed hours, trailing 28d **logged days only**). Interpretation: sustained >1.4 = systematic optimism. Gate: 28d history including ≥14 days with any logged activity (unlogged days are missing capacity observations, not zero capacity — remediation B16).
 
 **M9 Under-execution Ratio** — 1 − executed/planned (14d mean). With M8 separates "plans too big" from "execution weak".
 
@@ -687,3 +687,12 @@ Decisions taken during the P0 build that adjust this document. All are additive 
 | A6 | Wall-clock↔UTC ambiguity conventions fixed & tested | Fold → FIRST occurrence (earlier instant); Gap → resolve forward one hour (moment-timezone convention). See `src/lib/metrics/dates.ts`. |
 | A7 | CSP permits `'unsafe-eval'` only when NODE_ENV≠production | React Fast Refresh/HMR needs eval; production headers remain strict per §15. |
 | A8 | M6 overdue series computed historically by snapshot job (`overdue_count`) | Weekly slope needs retroactive counts; derived from task due/completion lifecycle, not fabricated. |
+| A9 | Timer `stop` accepts a client-captured stop instant with server-side skew bounds (>60s flagged via audit, >5min rejected) and frozen start-day attribution | Offline queue delays delivery; without the carried instant, durations silently inflated (Phase-2 finding C6). Server remains authoritative/validating. |
+| A10 | Idempotency uses reservation rows with a 120s TTL takeover + delete-on-handler-failure | Guarantees no permanently wedged op after a crash between reserve and respond (C4), without new infrastructure. Concurrent duplicates receive transient 409 `op_in_flight`; clients treat it as retryable. |
+| A11 | Bootstrap POST doubles as pre-confirmation secret recovery (token-gated, rate-limited); confirmed accounts can never re-enter | Removes the lost-secret brick path (C5) without weakening the single-account invariant. |
+| A12 | Confidence meta-gate is a typed discriminated union (`observed \| insufficient`) that fails closed | Sentinel numbers could masquerade as healthy shares (C3). Insufficient data now always degrades confidence. |
+| A13 | `tasks.completed_local_date` column added; completion day frozen at transition | Read-time derivation under changing profile tz could rewrite history (C9). Legacy null rows fall back to documented derivation. |
+| A14 | Facts-layer executed-planned clamp removed | Architecture formulas for M3/M9 imply symmetric variance; the clamp made overshoot structurally invisible while metadata claimed otherwise (C10). Overshoot is now representable and truthful. |
+| A15 | Work/Tasks bucketing requires a resolved local date; overdue predicate is unconditional | The optional-date path produced an "Overdue" bucket containing all open tasks (C1). |
+| A16 | Production self-host parity shipped for real: standalone Next output + Dockerfile (deps/build/migrator/runner) + docker-compose.prod.yml with one-shot migrate service | §15 promised compose "from day one"; Phase-2 audit found it missing. |
+| A17 | `sync_ops` 90-day retention implemented in the nightly snapshot job; prunes only completed ops | §14 retention was specified but unimplemented; response-less reservations are never pruned so client queues can always resolve. |

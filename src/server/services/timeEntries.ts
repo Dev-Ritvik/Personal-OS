@@ -81,20 +81,64 @@ export async function startTimer(
   });
 }
 
-export async function stopTimer(ctx: EntryCtx) {
+/**
+ * Stop the running timer.
+ *
+ * C6 remediation: the client transmits its intended stop instant. The server
+ * validates it against skew bounds and remains authoritative:
+ *   - omitted  -> server now (legacy/online path)
+ *   - < start  -> rejected (400)
+ *   - > now+5m -> rejected (400 clock_skew_future) — no arbitrary durations
+ *   - > now+60s-> accepted, flagged via audit trail (anomalous skew)
+ * local_date stays frozen from startedAt (diary attribution), never re-derived
+ * from the stop instant.
+ */
+export async function stopTimer(
+  ctx: EntryCtx,
+  input: { stoppedAt?: string },
+) {
   const row = await prisma.timeEntry.findFirst({
     where: { userId: ctx.userId, endedAt: null, voidedAt: null },
     orderBy: { startedAt: "desc" },
   });
   if (!row) throw new ApiError(404, "no_running_timer", "No timer is running");
-  const now = new Date();
+
+  const now = Date.now();
+  let stopMs = now;
+  if (input.stoppedAt !== undefined) {
+    const parsed = Date.parse(input.stoppedAt);
+    if (Number.isNaN(parsed)) {
+      throw new ApiError(400, "bad_timestamp", "Invalid stoppedAt");
+    }
+    if (parsed < row.startedAt.getTime()) {
+      throw new ApiError(400, "stop_before_start", "Stop instant precedes start");
+    }
+    const futureSkewMs = parsed - now;
+    if (futureSkewMs > 5 * 60_000) {
+      throw new ApiError(400, "clock_skew_future", "Stop instant too far in the future");
+    }
+    if (futureSkewMs > 60_000) {
+      await auditSafe(ctx.userId, Math.round(futureSkewMs / 1000));
+    }
+    stopMs = parsed;
+  }
+
   return prisma.timeEntry.update({
     where: { id: row.id },
     data: {
-      endedAt: now,
-      durationSec: Math.max(0, Math.floor((now.getTime() - row.startedAt.getTime()) / 1000)),
+      endedAt: new Date(stopMs),
+      durationSec: Math.max(0, Math.floor((stopMs - row.startedAt.getTime()) / 1000)),
     },
   });
+}
+
+async function auditSafe(userId: string, skewSec: number): Promise<void> {
+  try {
+    const { audit } = await import("../api");
+    await audit(userId, "timer_clock_skew", "time_entry", undefined, { skewSec });
+  } catch {
+    // Auditing must never break the stop path.
+  }
 }
 
 /** Quick-log: lowest-friction capture after the fact. */

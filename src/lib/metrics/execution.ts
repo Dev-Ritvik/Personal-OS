@@ -2,15 +2,16 @@
 import { gate, insufficient, ok } from "./gates";
 
 /**
- * M1 â€” Execution Rate (day)
+ * M1 — Execution Rate (day)
  * formula: met_scheduled / scheduled
- * Epistemic class: computed_metric (descriptive; no gate).
- * Limitation: gameable by under-planning â†’ always read next to M8/M9.
+ * Epistemic class: computed_metric (descriptive; no gate beyond having a denominator).
+ * Limitation: gameable by under-planning → always read next to M8/M9.
  */
 export const M1: MetricMeta = {
   key: "m1_execution_rate",
   label: "Execution rate",
-  formula: "execution_rate = met_scheduled / scheduled_behaviors  (undefined when nothing was scheduled)",
+  formula:
+    "execution_rate = met_scheduled / scheduled_behaviors  (undefined when nothing was scheduled)",
   epistemic: "computed_metric",
   interpretation: "Share of today's scheduled behaviors that met their target.",
   limitation:
@@ -29,30 +30,26 @@ export function executionRate(fact: DayFact): MetricResult<number> {
       },
     ]);
   }
-  return ok(
-    M1,
-    fact.behaviorMet! / fact.behaviorScheduled,
-    [
-      {
-        name: "scheduled_obligations",
-        observed: fact.behaviorScheduled,
-        required: 1,
-        passed: true,
-      },
-    ],
-  );
+  return ok(M1, fact.behaviorMet! / fact.behaviorScheduled, [
+    {
+      name: "scheduled_obligations",
+      observed: fact.behaviorScheduled,
+      required: 1,
+      passed: true,
+    },
+  ]);
 }
 
 /**
- * M2 â€” Consistency Score
- * formula: Î£ w(d)Â·rate(d) / Î£ w(d),  w(d)=exp(âˆ’age_days/21), rate(d)=met/scheduled
- * over days that had obligations. Gate: n â‰¥ minDays.
+ * M2 — Consistency Score
+ * formula: Σ w(d)·rate(d) / Σ w(d),  w(d)=exp(−age_days/21), rate(d)=met/scheduled
+ * over days that had obligations. Gate: n ≥ minDays.
  */
 export const M2: MetricMeta = {
   key: "m2_consistency",
   label: "Consistency score",
   formula:
-    "consistency = Î£ exp(âˆ’age_days/21) Â· (met/scheduled) / Î£ exp(âˆ’age_days/21),  over obligation days",
+    "consistency = Σ exp(−age_days/21) · (met/scheduled) / Σ exp(−age_days/21),  over obligation days",
   epistemic: "computed_metric",
   interpretation:
     "Recency-weighted adherence to scheduled behaviors across the window. Recent days count more.",
@@ -81,9 +78,13 @@ export function consistencyScore(
   let wsum = 0;
   let wrate = 0;
   for (const f of obligationDays) {
-    const age = Math.max(0, Math.round(
-      (Date.parse(`${lastDate}T00:00:00Z`) - Date.parse(`${f.date}T00:00:00Z`)) / 86_400_000,
-    ));
+    const age = Math.max(
+      0,
+      Math.round(
+        (Date.parse(`${lastDate}T00:00:00Z`) - Date.parse(`${f.date}T00:00:00Z`)) /
+          86_400_000,
+      ),
+    );
     const w = Math.exp(-age / 21);
     wsum += w;
     wrate += w * (f.behaviorMet! / f.behaviorScheduled!);
@@ -91,7 +92,22 @@ export function consistencyScore(
   return ok(M2, wsum > 0 ? wrate / wsum : 0, g);
 }
 
-/** M10-lite â€” Schedule reliability is M2 with a 14-day window (kept explicit for UI). */
+/**
+ * M10-lite — Schedule reliability: the M2 computation over a 14-day window
+ * with its own identity, so provenance is never mislabeled (C10 remediation).
+ */
+export const M10: MetricMeta = {
+  key: "m10_schedule_reliability",
+  label: "Schedule reliability",
+  formula:
+    "reliability = Σ exp(−age_days/21) · (met/scheduled) / Σ exp(−age_days/21),  trailing 14d, gate n≥10 obligation days",
+  epistemic: "computed_metric",
+  interpretation:
+    "Recency-weighted adherence to scheduled behaviors across the last two weeks.",
+  limitation: "Same insensitivity to target magnitude as M2.",
+};
+
 export function scheduleReliability(facts: DayFact[]): MetricResult<number> {
-  return consistencyScore(facts, { windowDays: 14, minDays: 10 });
+  const r = consistencyScore(facts, { windowDays: 14, minDays: 10 });
+  return { ...r, meta: M10 };
 }

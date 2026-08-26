@@ -58,6 +58,23 @@ export function deviceTimezone(): string {
   }
 }
 
+/**
+ * The caller's diary day ('YYYY-MM-DD'), resolved via Intl — mirrors the
+ * server's todayInTz so client and server agree on "today" (C2).
+ */
+export function localToday(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: deviceTimezone(),
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 export class OfflineQueued extends Error {}
 
 let flushing = false;
@@ -89,16 +106,23 @@ export async function flushQueue(): Promise<{ flushed: number }> {
         ops.shift();
         save(QUEUE_KEY, ops);
         flushed++;
-      } else if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+      } else if (
+        res.status >= 400 &&
+        res.status < 500 &&
+        ![408, 409, 429].includes(res.status)
+      ) {
+        // Permanent rejection → park for inspection.
         ops.shift();
         save(QUEUE_KEY, ops);
         failed.push({ ...op, tries: op.tries + 1 });
         save(FAILED_KEY, failed);
       } else {
+        // Transient (network-ish, throttled, or in-flight reservation) —
+        // keep queued and back off (C4: never park on 409 op_in_flight).
         op.tries++;
         ops[0] = op;
         save(QUEUE_KEY, ops);
-        break; // transient — back off
+        break;
       }
       notify();
     }

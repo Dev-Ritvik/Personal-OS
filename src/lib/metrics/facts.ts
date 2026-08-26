@@ -77,10 +77,10 @@ export function buildDayFacts(
       );
       hasPlanByDate.add(p.localDate);
     }
-    if (
-      hasExecAttribution(p)
-    ) {
-      const eff = Math.max(0, Math.min(p.actualMinutes!, p.plannedMinutes!));
+    if (hasExecAttribution(p)) {
+      // C10 remediation: overshoot is now representable — executed planned
+      // minutes equal actual minutes attributable to a real plan target.
+      const eff = Math.max(0, p.actualMinutes!);
       execPlannedByDate.set(
         p.localDate,
         (execPlannedByDate.get(p.localDate) ?? 0) + eff,

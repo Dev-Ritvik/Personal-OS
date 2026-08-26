@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useMe, useCategories, useCategoryCreate, useSettingsPatch, useSnapshotJob } from "@/lib/client/hooks";
+import { useMe, useCategories, useCategoryCreate, useSettingsPatch, useSnapshotJob, useDeleteAll } from "@/lib/client/hooks";
+import { OpStatus } from "@/components/OpStatus";
 
 const VALUE_CLASSES = ["productive", "maintenance", "intentional_leisure", "unproductive", "neutral"];
+const CONFIRM_PHRASE = "DELETE EVERYTHING";
 
 export default function SettingsPage() {
   const me = useMe();
@@ -11,6 +13,7 @@ export default function SettingsPage() {
   const catCreate = useCategoryCreate();
   const patch = useSettingsPatch();
   const snapshotJob = useSnapshotJob();
+  const deleteAll = useDeleteAll();
 
   const [tz, setTz] = useState("");
   const [ws, setWs] = useState("");
@@ -18,6 +21,7 @@ export default function SettingsPage() {
   const [newCat, setNewCat] = useState("");
   const [newClass, setNewClass] = useState("productive");
   const [msg, setMsg] = useState<string | null>(null);
+  const [confirmText, setConfirmText] = useState("");
 
   useEffect(() => {
     if (!me.data) return;
@@ -34,12 +38,16 @@ export default function SettingsPage() {
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
-    await patch.mutateAsync({
-      timezone: tz,
-      wakingStartMin: toMin(ws),
-      wakingEndMin: toMin(we),
-    });
-    setMsg("Saved. Applies to future entries only — history keeps its frozen dates.");
+    try {
+      await patch.mutateAsync({
+        timezone: tz,
+        wakingStartMin: toMin(ws),
+        wakingEndMin: toMin(we),
+      });
+      setMsg("Saved. Applies to future entries only — history keeps its frozen dates.");
+    } catch (err) {
+      setMsg(err instanceof Error ? `Failed: ${err.message}` : "Failed to save");
+    }
   }
 
   return (
@@ -65,7 +73,8 @@ export default function SettingsPage() {
         </div>
         <div className="flex items-center gap-3">
           <button className="btn btn-accent" disabled={patch.isPending}>Save</button>
-          {msg && <span className="text-2xs" style={{ color: "var(--ok)" }}>{msg}</span>}
+          <OpStatus mutation={patch} />
+          {msg && <span className="text-2xs" style={{ color: patch.isError ? "var(--bad)" : "var(--ok)" }}>{msg}</span>}
         </div>
       </form>
 
@@ -172,6 +181,39 @@ export default function SettingsPage() {
         >
           Sign out
         </button>
+      </section>
+
+      {/* Danger zone — P0 deletion flow (§15) */}
+      <section className="panel rounded p-4 space-y-2" style={{ borderColor: "var(--bad)" }}>
+        <h2 className="text-xs uppercase tracking-wider" style={{ color: "var(--bad)" }}>Danger zone</h2>
+        <p className="text-2xs" style={{ color: "var(--muted)" }}>
+          Permanently deletes every record, the account, and all sessions. A single tombstone audit entry remains.
+          Export first if in doubt.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="input num w-64 text-xs"
+            placeholder={CONFIRM_PHRASE}
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+          />
+          <button
+            className="btn"
+            style={{ color: confirmText === CONFIRM_PHRASE ? "var(--bad)" : undefined, borderColor: "var(--bad)" }}
+            disabled={confirmText !== CONFIRM_PHRASE || deleteAll.isPending}
+            onClick={async () => {
+              try {
+                await deleteAll.mutateAsync(confirmText);
+                window.location.href = "/bootstrap";
+              } catch {
+                // status rendered below
+              }
+            }}
+          >
+            Delete everything
+          </button>
+          <OpStatus mutation={deleteAll} labels={{ saved: "Deleted" }} />
+        </div>
       </section>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useBehaviors, useCategories, useBehaviorCreate, useCheckin, useToday } from "@/lib/client/hooks";
+import { OpStatus } from "@/components/OpStatus";
 
 export default function BehaviorsPage() {
   const behaviors = useBehaviors();
@@ -157,6 +158,7 @@ export default function BehaviorsPage() {
             })}
           </ul>
         )}
+        <div className="mt-2"><OpStatus mutation={checkin} /></div>
       </section>
 
       <p className="text-2xs" style={{ color: "var(--faint)" }}>

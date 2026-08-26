@@ -11,7 +11,8 @@
   --line: #232c37;
   --ink: #d6dde6;
   --muted: #8a94a2;
-  --faint: #5a6472;
+  /* C-a11y: raised from #5a6472 (≈2.6:1) to meet WCAG AA on panel/bg. */
+  --faint: #7d8794;
   --accent: #7aa2f7;
   --ok: #74c69d;
   --warn: #d9a55b;
@@ -26,12 +27,16 @@
     --line: #d9dee5;
     --ink: #1c2530;
     --muted: #5b6570;
-    --faint: #98a1ac;
+    --faint: #5f6a77;
     --accent: #3b6fd4;
     --ok: #2e7d54;
     --warn: #9a6b1f;
     --bad: #b04a4a;
   }
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 html,

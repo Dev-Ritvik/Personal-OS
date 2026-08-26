@@ -2,6 +2,7 @@ import { handle, idempotent, json, requireSession } from "@/server/api";
 import { z } from "zod";
 import { behaviorUpdate, behaviorTargetSchema, scheduleSchema } from "@/server/validation";
 import { behaviorHistory, updateBehavior } from "@/server/services/behaviors";
+import { todayInTz } from "@/lib/metrics/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +22,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const s = await requireSession();
     const raw = await req.json();
     const input = updateInput.parse(raw);
+    const deviceTz = new URL(req.url).searchParams.get("deviceTz");
+    const todayLocal = todayInTz(deviceTz ?? s.timezone);
     const { result, replayed } = await idempotent(
       s.id,
       raw?.clientOpId as string | undefined,
       `behavior.update:${params.id}`,
-      () => updateBehavior(s.id, params.id, input),
+      () => updateBehavior(s.id, params.id, input, { todayLocal }),
     );
     return json(
       { data: result },

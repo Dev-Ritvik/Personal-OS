@@ -19,9 +19,24 @@ export async function createTask(userId: string, body: unknown) {
       priority: input.priority ?? 0,
     },
   });
+
 }
 
-export async function updateTask(userId: string, id: string, body: unknown) {
+/**
+ * C1 remediation: `todayLocal` is REQUIRED. An overdue/today classification
+ * can never execute without a resolved user-local calendar date — the
+ * structural guard against the "overdue = everything" defect.
+ *
+ * Completion policy (C9): transitioning to done freezes `completed_local_date`
+ * using the caller-resolved diary date. Reopening (done → open) annuls the
+ * completion record (clears both stamps); re-completing stamps afresh.
+ */
+export async function updateTask(
+  userId: string,
+  id: string,
+  body: unknown,
+  opts: { todayLocal: string },
+) {
   const input = taskUpdate.parse(body);
   const existing = await prisma.task.findFirst({ where: { id, userId, deletedAt: null } });
   if (!existing) throw new ApiError(404, "not_found", "Task not found");
@@ -34,8 +49,18 @@ export async function updateTask(userId: string, id: string, body: unknown) {
   if ("priority" in input) data.priority = (input.priority as number) ?? null;
   if (typeof input.status === "string") {
     data.status = input.status;
-    data.completedAt =
-      input.status === "done" ? (existing.completedAt ?? new Date()) : null;
+    if (input.status === "done") {
+      data.completedAt = existing.completedAt ?? new Date();
+      // Freeze the completion day exactly once (first completion wins).
+      data.completedLocalDate =
+        existing.completedLocalDate ?? new Date(`${opts.todayLocal}T00:00:00Z`);
+    } else {
+      // Reopen/cancel annuls the completion record.
+      if (existing.status === "done") {
+        data.completedAt = null;
+        data.completedLocalDate = null;
+      }
+    }
   }
 
   const updated = await prisma.task.update({ where: { id }, data });
@@ -85,14 +110,24 @@ export interface TaskLists {
 
 const OPEN = ["todo", "doing"] as const;
 
-export async function listTasks(userId: string, todayLocal?: string): Promise<TaskLists> {
+/**
+ * Bucket semantics (C1):
+ *   overdue = status ∈ {todo,doing} AND dueDate < todayLocal
+ *   today   = status ∈ {todo,doing} AND dueDate = todayLocal
+ * Tasks without due dates are never overdue. Future tasks are never overdue.
+ * The date predicate is UNCONDITIONAL — this function cannot be misused by
+ * omitting a date.
+ */
+export async function listTasks(userId: string, todayLocal: string): Promise<TaskLists> {
   const base = { userId, deletedAt: null };
+  const todayStart = new Date(`${todayLocal}T00:00:00Z`);
+
   const [overdue, done, all] = await Promise.all([
     prisma.task.findMany({
       where: {
         ...base,
         status: { in: [...OPEN] },
-        ...(todayLocal ? { dueDate: { lt: new Date(todayLocal) } } : {}),
+        dueDate: { lt: todayStart, not: null },
       },
       orderBy: [{ dueDate: "asc" }, { priority: "desc" }],
     }),
@@ -108,11 +143,11 @@ export async function listTasks(userId: string, todayLocal?: string): Promise<Ta
   ]);
 
   const overdueIds = new Set(overdue.map((t) => t.id));
-  const today = todayLocal
-    ? all.filter((t) => !overdueIds.has(t.id) && t.dueDate?.toISOString().slice(0, 10) === todayLocal)
-    : [];
-  const todayAndOver = new Set([...overdue.map((t) => t.id), ...today.map((t) => t.id)]);
-  const inbox = all.filter((t) => !todayAndOver.has(t.id));
+  const today = all.filter(
+    (t) => !overdueIds.has(t.id) && t.dueDate?.getTime() === todayStart.getTime(),
+  );
+  const excluded = new Set([...overdueIds, ...today.map((t) => t.id)]);
+  const inbox = all.filter((t) => !excluded.has(t.id));
 
   return { overdue, today, inbox, done };
 }
