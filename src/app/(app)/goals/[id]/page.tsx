@@ -3,6 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useGoalDetail } from "@/lib/client/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/client/api";
 
 interface Detail {
   id: string; title: string; description: string | null;
@@ -115,6 +117,36 @@ export default function GoalDetailPage() {
           )}
         </section>
       )}
+
+      <GoalSkills goalId={g.id} />
     </div>
+  );
+}
+
+function GoalSkills({ goalId }: { goalId: string }) {
+  const { data } = useQuery({
+    queryKey: ["goal-skills", goalId],
+    queryFn: () => api<{ data: any[] }>(`/api/goals/${goalId}/skills`).then((r) => r.data),
+  });
+  const skills = (data ?? []) as any[];
+  return (
+    <section className="panel rounded p-4">
+      <h2 className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--faint)" }}>
+        Required Skills — Goal → Skill graph (AC-PM6)
+      </h2>
+      {skills.length === 0 ? (
+        <p className="text-2xs" style={{ color: "var(--faint)" }}>No skills linked yet. Skills make the capability chain visible without inventing scores.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {skills.map((link: any) => (
+            <li key={link.id} className="flex items-center gap-2 text-xs">
+              <Link href={`/skills/${link.skill.id}`} className="hover:underline font-medium">{link.skill.name}</Link>
+              <span className="chip text-2xs" style={{ color: "var(--faint)" }}>{link.skill.category?.replace("_", " ")}</span>
+              <span className="chip text-2xs">{link.skill.currentLevel} → {link.requiredLevel ?? link.skill.targetLevel}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

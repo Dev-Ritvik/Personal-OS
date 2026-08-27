@@ -23,6 +23,16 @@ export async function exportAll(userId: string): Promise<object> {
     sessions,
     syncOps,
     auditLog,
+    personalProfile,
+    stateItems,
+    skills,
+    skillEvidence,
+    goalSkillLinks,
+    taskSkillLinks,
+    financialAccount,
+    financialEntries,
+    savingsGoals,
+    readinessDimensions,
   ] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId } }),
     prisma.category.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
@@ -59,11 +69,21 @@ export async function exportAll(userId: string): Promise<object> {
     prisma.syncOp.findMany({ where: { userId }, orderBy: { receivedAt: "asc" } }),
     // C8: the audit trail is part of the user's history.
     prisma.auditLog.findMany({ where: { actor: userId }, orderBy: { at: "asc" } }),
+    prisma.personalProfile.findUnique({ where: { userId } }),
+    prisma.stateItem.findMany({ where: { userId }, orderBy: { kind: "asc" } }),
+    prisma.skill.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+    prisma.skillEvidence.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+    prisma.goalSkillLink.findMany({ where: { userId } }),
+    prisma.taskSkillLink.findMany({ where: { userId } }),
+    prisma.financialAccount.findUnique({ where: { userId } }),
+    prisma.financialEntry.findMany({ where: { userId }, orderBy: { occurredOn: "asc" } }),
+    prisma.savingsGoal.findMany({ where: { userId } }),
+    prisma.readinessDimension.findMany({ where: { userId } }),
   ]);
 
   return {
     format: "pos-export",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     counts: {
       categories: categories.length,
@@ -104,9 +124,17 @@ export async function exportAll(userId: string): Promise<object> {
       interventionLog,
       sessions: sessions.map((s) => ({ ...s, tokenHash: "[redacted]" })),
       syncOps,
-      // C8: full audit trail. User object intentionally omits password/totp
-      // material (never selected).
       auditLog,
+      personalProfile,
+      stateItems,
+      skills,
+      skillEvidence,
+      goalSkillLinks,
+      taskSkillLinks,
+      financialAccount,
+      financialEntries,
+      savingsGoals,
+      readinessDimensions,
     },
   };
 }

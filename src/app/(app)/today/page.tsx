@@ -5,6 +5,8 @@ import { useToday, useCheckin, useTaskMutations } from "@/lib/client/hooks";
 import { CaptureBar } from "@/components/CaptureBar";
 import { MetricTile } from "@/components/MetricTile";
 import { PlanVsActual } from "@/components/PlanVsActual";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/client/api";
 
 /**
  * Today — mandated question coverage (ARCHITECTURE.md §5.2):
@@ -72,6 +74,8 @@ export default function TodayPage() {
       )}
 
       <CaptureBar />
+
+      <CommandBrief />
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Focus list */}
@@ -188,6 +192,40 @@ export default function TodayPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function CommandBrief() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["recommendations"],
+    queryFn: () => api<{ data: any[] }>("/api/personal/recommendations").then((r) => r.data),
+  });
+
+  if (isLoading) return <div className="panel rounded p-3 h-16 animate-pulse" />;
+  if (!data || data.length === 0) return null;
+
+  return (
+    <section className="panel rounded p-4 border-l-2" style={{ borderLeftColor: "var(--accent)" }}>
+      <h2 className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--faint)" }}>
+        Command Brief — What matters today (strict)
+      </h2>
+      <ul className="space-y-2">
+        {data.slice(0, 3).map((rec: any, i: number) => (
+          <li key={i} className="border-t pt-2" style={{ borderColor: "var(--line)" }}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium">{rec.title}</span>
+              <span className={`chip text-2xs ${rec.confidence === "HIGH" ? "chip-metric" : rec.confidence === "INSUFFICIENT" ? "chip-insufficient" : ""}`}>
+                {rec.confidence}
+              </span>
+              <span className="chip text-2xs" style={{ color: "var(--faint)" }}>{rec.epistemic}</span>
+            </div>
+            <p className="text-2xs mt-1" style={{ color: "var(--muted)" }}>{rec.reason}</p>
+            <p className="text-2xs" style={{ color: "var(--faint)" }}>Evidence: {Object.entries(rec.evidence).map(([k, v]) => `${k}=${v}`).join(" · ")}</p>
+            <p className="text-2xs font-medium" style={{ color: "var(--accent)" }}>→ {rec.recommendedAction}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

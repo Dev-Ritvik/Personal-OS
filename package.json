@@ -25,6 +25,7 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:seed": "node scripts/seed.mjs",
+    "db:seed:personal": "node scripts/seed-personal-model.mjs",
     "snapshot": "node scripts/snapshot.mjs",
     "postinstall": "prisma generate"
   },

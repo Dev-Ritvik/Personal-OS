@@ -27,6 +27,19 @@ export async function deleteEverything(
   if (!user) throw new ApiError(404, "not_found", "Account not found");
 
   await prisma.$transaction(async (tx) => {
+    await tx.financialEntry.deleteMany({ where: { userId } });
+    await tx.savingsGoal.deleteMany({ where: { userId } });
+    await tx.financialAccount.deleteMany({ where: { userId } });
+    await tx.readinessRequirement.deleteMany({ where: { userId } });
+    await tx.readinessDimension.deleteMany({ where: { userId } });
+    await tx.targetStateRequirement.deleteMany({ where: { userId } });
+    await tx.taskSkillLink.deleteMany({ where: { userId } });
+    await tx.goalSkillLink.deleteMany({ where: { userId } });
+    await tx.skillEvidence.deleteMany({ where: { userId } });
+    await tx.skillDependency.deleteMany({ where: { userId } });
+    await tx.skill.deleteMany({ where: { userId } });
+    await tx.stateItem.deleteMany({ where: { userId } });
+    await tx.personalProfile.deleteMany({ where: { userId } });
     await tx.categoryHistory.deleteMany({ where: { category: { userId } } });
     await tx.timeEntry.deleteMany({ where: { userId } });
     await tx.planInstance.deleteMany({ where: { userId } });

@@ -12,11 +12,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // Runtime connection. On Supabase this is the POOLED url (pgBouncer,
   // port 6543) with ?pgbouncer=true&connection_limit=1&pool_timeout=5.
   // Locally / self-hosted: the direct database URL (both vars identical).
-  url = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
   // Migration/CLI connection (prisma migrate deploy). Must be a DIRECT
   // (session-mode, port 5432) connection — PgBouncer transaction mode is not
   // supported by Prisma Migrate. Phase-5 remediation; see .env.example.
@@ -115,32 +115,44 @@ enum Disposition {
 }
 
 model User {
-  id                  String   @id
-  email               String   @unique
-  passwordHash        String?  @map("password_hash")
-  webauthnCredentials Json?    @map("webauthn_credentials")
-  totpSecretEnc       String?  @map("totp_secret_enc")
-  totpConfirmed       Boolean  @default(false) @map("totp_confirmed")
-  failedAttempts      Int      @default(0) @map("failed_attempts")
+  id                  String    @id
+  email               String    @unique
+  passwordHash        String?   @map("password_hash")
+  webauthnCredentials Json?     @map("webauthn_credentials")
+  totpSecretEnc       String?   @map("totp_secret_enc")
+  totpConfirmed       Boolean   @default(false) @map("totp_confirmed")
+  failedAttempts      Int       @default(0) @map("failed_attempts")
   lockedUntil         DateTime? @map("locked_until")
-  timezone            String   @default("UTC")
-  wakingStartMin      Int      @default(420) @map("waking_start_min") // minutes from midnight, local
-  wakingEndMin        Int      @default(1380) @map("waking_end_min")
-  prefs               Json     @default("{}")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  timezone            String    @default("UTC")
+  wakingStartMin      Int       @default(420) @map("waking_start_min") // minutes from midnight, local
+  wakingEndMin        Int       @default(1380) @map("waking_end_min")
+  prefs               Json      @default("{}")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  sessions          Session[]
-  categories        Category[]
-  goals             Goal[]
-  behaviors         Behavior[]
-  tasks             Task[]
-  planInstances     PlanInstance[]
-  timeEntries       TimeEntry[]
-  measurements      Measurement[]
-  events            Event[]
-  reflections       Reflection[]
-  interventionsLog  InterventionLog[]
+  sessions               Session[]
+  categories             Category[]
+  goals                  Goal[]
+  behaviors              Behavior[]
+  tasks                  Task[]
+  planInstances          PlanInstance[]
+  timeEntries            TimeEntry[]
+  measurements           Measurement[]
+  events                 Event[]
+  reflections            Reflection[]
+  interventionsLog       InterventionLog[]
+  PersonalProfile        PersonalProfile?
+  StateItem              StateItem[]
+  Skill                  Skill[]
+  SkillEvidence          SkillEvidence[]
+  GoalSkillLink          GoalSkillLink[]
+  TaskSkillLink          TaskSkillLink[]
+  TargetStateRequirement TargetStateRequirement[]
+  FinancialAccount       FinancialAccount?
+  FinancialEntry         FinancialEntry[]
+  SavingsGoal            SavingsGoal[]
+  ReadinessDimension     ReadinessDimension[]
+  ReadinessRequirement   ReadinessRequirement[]
 
   @@map("users")
 }
@@ -171,11 +183,11 @@ model Category {
   createdAt  DateTime   @default(now()) @map("created_at")
   updatedAt  DateTime   @updatedAt @map("updated_at")
 
-  user          User              @relation(fields: [userId], references: [id])
-  history       CategoryHistory[]
-  behaviors     Behavior[]
-  timeEntries   TimeEntry[]
-  events        Event[]
+  user        User              @relation(fields: [userId], references: [id])
+  history     CategoryHistory[]
+  behaviors   Behavior[]
+  timeEntries TimeEntry[]
+  events      Event[]
 
   @@index([userId])
   @@map("categories")
@@ -183,12 +195,12 @@ model Category {
 
 /// value_class changes are versioned: they change historical analytics meaning.
 model CategoryHistory {
-  id         String     @id
-  categoryId String     @map("category_id")
+  id         String   @id
+  categoryId String   @map("category_id")
   field      String
-  oldValue   String     @map("old_value")
-  newValue   String     @map("new_value")
-  changedAt  DateTime   @default(now()) @map("changed_at")
+  oldValue   String   @map("old_value")
+  newValue   String   @map("new_value")
+  changedAt  DateTime @default(now()) @map("changed_at")
 
   category Category @relation(fields: [categoryId], references: [id])
 
@@ -206,7 +218,7 @@ model Goal {
   kind         GoalKind
   measureType  MeasureType @map("measure_type")
   unit         String?
-  targetValue  Decimal?    @db.Decimal(14, 4) @map("target_value")
+  targetValue  Decimal?    @map("target_value") @db.Decimal(14, 4)
   /// Manual progress updates for quantity/duration/deadline goals (§6.2).
   /// Amendment note: added during implementation; target alone cannot express
   /// "current" without fabricating it from unrelated records.
@@ -216,17 +228,20 @@ model Goal {
   targetDate   DateTime?   @map("target_date") @db.Date
   status       GoalStatus  @default(draft)
   closedAt     DateTime?   @map("closed_at")
-  closingValue Decimal?    @db.Decimal(14, 4) @map("closing_value")
+  closingValue Decimal?    @map("closing_value") @db.Decimal(14, 4)
   sort         Int         @default(0)
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
   deletedAt    DateTime?   @map("deleted_at")
 
-  parent    Goal?     @relation("GoalTree", fields: [parentId], references: [id])
-  children  Goal[]    @relation("GoalTree")
-  user      User      @relation(fields: [userId], references: [id])
-  behaviors Behavior[]
-  tasks     Task[]
+  parent               Goal?                  @relation("GoalTree", fields: [parentId], references: [id])
+  children             Goal[]                 @relation("GoalTree")
+  user                 User                   @relation(fields: [userId], references: [id])
+  behaviors            Behavior[]
+  tasks                Task[]
+  GoalSkillLink        GoalSkillLink[]
+  FinancialEntry       FinancialEntry[]
+  ReadinessRequirement ReadinessRequirement[]
 
   @@index([parentId])
   @@index([userId, status])
@@ -234,78 +249,79 @@ model Goal {
 }
 
 model Behavior {
-  id           String         @id
-  userId       String         @map("user_id")
-  goalId       String?        @map("goal_id")
-  categoryId   String?        @map("category_id")
-  title        String
-  schedule     Json
-  target       Json
-  status       BehaviorStatus @default(active)
-  startedOn    DateTime       @default(now()) @map("started_on") @db.Date
-  pausedUntil  DateTime?      @map("paused_until") @db.Date
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
-  deletedAt    DateTime?      @map("deleted_at")
+  id          String         @id
+  userId      String         @map("user_id")
+  goalId      String?        @map("goal_id")
+  categoryId  String?        @map("category_id")
+  title       String
+  schedule    Json
+  target      Json
+  status      BehaviorStatus @default(active)
+  startedOn   DateTime       @default(now()) @map("started_on") @db.Date
+  pausedUntil DateTime?      @map("paused_until") @db.Date
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  deletedAt   DateTime?      @map("deleted_at")
 
-  user          User           @relation(fields: [userId], references: [id])
-  goal          Goal?          @relation(fields: [goalId], references: [id])
-  category      Category?      @relation(fields: [categoryId], references: [id])
-  timeEntries   TimeEntry[]
-  tasks         Task[]
+  user        User        @relation(fields: [userId], references: [id])
+  goal        Goal?       @relation(fields: [goalId], references: [id])
+  category    Category?   @relation(fields: [categoryId], references: [id])
+  timeEntries TimeEntry[]
+  tasks       Task[]
 
   @@index([userId, status])
   @@map("behaviors")
 }
 
 model Task {
-  id             String     @id
-  userId         String     @map("user_id")
-  goalId         String?    @map("goal_id")
-  behaviorId     String?    @map("behavior_id")
-  title          String
-  notes          String?
-  estimateMin    Int?       @map("estimate_min")
-  dueDate        DateTime?  @map("due_date") @db.Date
-  priority       Int?       @default(0) @db.SmallInt
-  status         TaskStatus @default(todo)
+  id                 String     @id
+  userId             String     @map("user_id")
+  goalId             String?    @map("goal_id")
+  behaviorId         String?    @map("behavior_id")
+  title              String
+  notes              String?
+  estimateMin        Int?       @map("estimate_min")
+  dueDate            DateTime?  @map("due_date") @db.Date
+  priority           Int?       @default(0) @db.SmallInt
+  status             TaskStatus @default(todo)
   /// Frozen at the moment of completion using the resolving tz (C9).
   /// Null for legacy rows → loaders fall back to documented derivation.
-  completedLocalDate DateTime? @map("completed_local_date") @db.Date
-  deferredCount  Int        @default(0) @map("deferred_count")
-  lastDeferredAt DateTime?  @map("last_deferred_at")
-  completedAt    DateTime?  @map("completed_at")
-  createdAt      DateTime   @default(now()) @map("created_at")
-  updatedAt      DateTime   @updatedAt @map("updated_at")
-  deletedAt      DateTime?  @map("deleted_at")
+  completedLocalDate DateTime?  @map("completed_local_date") @db.Date
+  deferredCount      Int        @default(0) @map("deferred_count")
+  lastDeferredAt     DateTime?  @map("last_deferred_at")
+  completedAt        DateTime?  @map("completed_at")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+  deletedAt          DateTime?  @map("deleted_at")
 
-  user          User           @relation(fields: [userId], references: [id])
-  goal          Goal?          @relation(fields: [goalId], references: [id])
-  behavior      Behavior?      @relation(fields: [behaviorId], references: [id])
+  user          User            @relation(fields: [userId], references: [id])
+  goal          Goal?           @relation(fields: [goalId], references: [id])
+  behavior      Behavior?       @relation(fields: [behaviorId], references: [id])
   timeEntries   TimeEntry[]
+  TaskSkillLink TaskSkillLink[]
 
   @@index([status, dueDate])
   @@map("tasks")
 }
 
 model PlanInstance {
-  id             String       @id
-  userId         String       @map("user_id")
-  localDate      DateTime     @map("local_date") @db.Date
-  refType        PlanRefType  @map("ref_type")
-  refId          String       @map("ref_id")
+  id             String      @id
+  userId         String      @map("user_id")
+  localDate      DateTime    @map("local_date") @db.Date
+  refType        PlanRefType @map("ref_type")
+  refId          String      @map("ref_id")
   origin         PlanOrigin
-  plannedMinutes Int?         @map("planned_minutes")
-  plannedQty     Decimal?     @db.Decimal(12, 3) @map("planned_qty")
-  actualMinutes  Int?         @map("actual_minutes")
-  actualQty      Decimal?     @db.Decimal(12, 3) @map("actual_qty")
+  plannedMinutes Int?        @map("planned_minutes")
+  plannedQty     Decimal?    @map("planned_qty") @db.Decimal(12, 3)
+  actualMinutes  Int?        @map("actual_minutes")
+  actualQty      Decimal?    @map("actual_qty") @db.Decimal(12, 3)
   met            Boolean?
-  doneAt         DateTime?    @map("done_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  voidedAt       DateTime?    @map("voided_at")
+  doneAt         DateTime?   @map("done_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  voidedAt       DateTime?   @map("voided_at")
 
-  user     User       @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 
   @@index([localDate])
   @@index([userId, localDate])
@@ -313,29 +329,29 @@ model PlanInstance {
 }
 
 model TimeEntry {
-  id           String      @id
-  userId       String      @map("user_id")
-  startedAt    DateTime    @map("started_at")
-  endedAt      DateTime?   @map("ended_at")
-  localDate    DateTime    @map("local_date") @db.Date
-  durationSec  Int?        @map("duration_sec")
-  source       EntrySource
-  taskId       String?     @map("task_id")
-  behaviorId   String?     @map("behavior_id")
-  categoryId   String?     @map("category_id")
-  note         String?
-  deviceId     String?     @map("device_id")
-  autoClosed   Boolean     @default(false) @map("auto_closed")
-  amendedBy    String?     @unique @map("amended_by")
-  voidedAt     DateTime?   @map("voided_at")
-  clientOpId   String?     @unique @map("client_op_id")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  id          String      @id
+  userId      String      @map("user_id")
+  startedAt   DateTime    @map("started_at")
+  endedAt     DateTime?   @map("ended_at")
+  localDate   DateTime    @map("local_date") @db.Date
+  durationSec Int?        @map("duration_sec")
+  source      EntrySource
+  taskId      String?     @map("task_id")
+  behaviorId  String?     @map("behavior_id")
+  categoryId  String?     @map("category_id")
+  note        String?
+  deviceId    String?     @map("device_id")
+  autoClosed  Boolean     @default(false) @map("auto_closed")
+  amendedBy   String?     @unique @map("amended_by")
+  voidedAt    DateTime?   @map("voided_at")
+  clientOpId  String?     @unique @map("client_op_id")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
-  user      User       @relation(fields: [userId], references: [id])
-  task      Task?      @relation(fields: [taskId], references: [id])
-  behavior  Behavior?  @relation(fields: [behaviorId], references: [id])
-  category  Category?  @relation(fields: [categoryId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  task     Task?     @relation(fields: [taskId], references: [id])
+  behavior Behavior? @relation(fields: [behaviorId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
 
   @@index([startedAt])
   @@index([userId, localDate])
@@ -373,8 +389,8 @@ model Event {
   createdAt   DateTime  @default(now()) @map("created_at")
   voidedAt    DateTime? @map("voided_at")
 
-  user      User       @relation(fields: [userId], references: [id])
-  category  Category?  @relation(fields: [categoryId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
 
   @@index([userId, localDate])
   @@map("events")
@@ -437,13 +453,312 @@ model AuditLog {
 }
 
 model SyncOp {
-  id          String   @id
-  userId      String   @map("user_id")
-  clientOpId  String   @unique @map("client_op_id")
-  op          Json
-  response    Json?
-  receivedAt  DateTime @default(now()) @map("received_at")
+  id         String   @id
+  userId     String   @map("user_id")
+  clientOpId String   @unique @map("client_op_id")
+  op         Json
+  response   Json?
+  receivedAt DateTime @default(now()) @map("received_at")
 
   @@index([userId, receivedAt])
   @@map("sync_ops")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PERSONAL MODEL V1 — Phase 6 (§6–§24)
+// All tables user-scoped, FK → users, append-style history where relevant.
+// No existing table is altered.
+
+enum SkillLevel {
+  UNKNOWN
+  BEGINNER
+  DEVELOPING
+  FUNCTIONAL
+  STRONG
+  ADVANCED
+}
+
+enum SkillCategory {
+  TECHNICAL
+  COMMUNICATION
+  BUSINESS
+  CAREER
+  INDEPENDENT_LIVING
+  PERSONAL_PERFORMANCE
+  INTERNATIONAL
+}
+
+enum SkillStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum EvidenceClass {
+  FACT
+  SELF_REPORT
+  INFERENCE
+  ASSESSMENT
+}
+
+enum StateKind {
+  CURRENT
+  TARGET
+}
+
+enum ReadinessStatus {
+  UNKNOWN
+  FOUNDATIONAL
+  DEVELOPING
+  READY
+  BLOCKED
+}
+
+enum FinancialEntryType {
+  INCOME
+  EXPENSE
+}
+
+model PersonalProfile {
+  id                 String   @id
+  userId             String   @unique @map("user_id")
+  displayName        String?  @map("display_name")
+  location           String?
+  education          String?
+  academicYear       String?  @map("academic_year")
+  currentCgpa        Decimal? @map("current_cgpa") @db.Decimal(4, 2)
+  targetCgpa         Decimal? @map("target_cgpa") @db.Decimal(4, 2)
+  classSchedule      Json?    @map("class_schedule")
+  bestWorkWindow     String?  @map("best_work_window")
+  worstWorkWindow    String?  @map("worst_work_window")
+  sleepWindow        Json?    @map("sleep_window")
+  sleepInconsistency Int?     @map("sleep_inconsistency")
+  preferences        Json     @default("{}")
+  constraints        Json     @default("[]")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("personal_profiles")
+}
+
+model StateItem {
+  id        String    @id
+  userId    String    @map("user_id")
+  kind      StateKind
+  domain    String
+  label     String
+  value     String
+  sort      Int       @default(0)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind])
+  @@map("state_items")
+}
+
+model Skill {
+  id             String        @id
+  userId         String        @map("user_id")
+  name           String
+  category       SkillCategory
+  description    String?
+  currentLevel   SkillLevel    @default(UNKNOWN) @map("current_level")
+  targetLevel    SkillLevel    @default(FUNCTIONAL) @map("target_level")
+  importance     Int           @default(2)
+  status         SkillStatus   @default(ACTIVE)
+  lastAssessedAt DateTime?     @map("last_assessed_at")
+  nextReviewAt   DateTime?     @map("next_review_at")
+  sort           Int           @default(0)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  archivedAt     DateTime?     @map("archived_at")
+
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dependencies  SkillDependency[]      @relation("SkillDependsOn")
+  dependents    SkillDependency[]      @relation("SkillDependents")
+  evidence      SkillEvidence[]
+  goalLinks     GoalSkillLink[]
+  taskLinks     TaskSkillLink[]
+  readinessReqs ReadinessRequirement[]
+
+  @@unique([userId, name])
+  @@index([userId, category])
+  @@index([userId, status])
+  @@map("skills")
+}
+
+model SkillDependency {
+  id               String   @id
+  userId           String   @map("user_id")
+  skillId          String   @map("skill_id")
+  dependsOnSkillId String   @map("depends_on_skill_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  skill          Skill @relation("SkillDependsOn", fields: [skillId], references: [id], onDelete: Cascade)
+  dependsOnSkill Skill @relation("SkillDependents", fields: [dependsOnSkillId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, dependsOnSkillId])
+  @@index([dependsOnSkillId])
+  @@map("skill_dependencies")
+}
+
+model SkillEvidence {
+  id             String        @id
+  userId         String        @map("user_id")
+  skillId        String        @map("skill_id")
+  title          String
+  description    String?
+  epistemicClass EvidenceClass @map("epistemic_class")
+  sourceType     String?       @map("source_type")
+  sourceId       String?       @map("source_id")
+  assessedLevel  SkillLevel?   @map("assessed_level")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([skillId])
+  @@index([userId, skillId])
+  @@map("skill_evidence")
+}
+
+model GoalSkillLink {
+  id            String      @id
+  userId        String      @map("user_id")
+  goalId        String      @map("goal_id")
+  skillId       String      @map("skill_id")
+  requiredLevel SkillLevel? @map("required_level")
+  notes         String?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  goal  Goal  @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, skillId])
+  @@index([skillId])
+  @@index([goalId])
+  @@map("goal_skill_links")
+}
+
+model TaskSkillLink {
+  id        String   @id
+  userId    String   @map("user_id")
+  taskId    String   @map("task_id")
+  skillId   String   @map("skill_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, skillId])
+  @@index([skillId])
+  @@index([taskId])
+  @@map("task_skill_links")
+}
+
+model TargetStateRequirement {
+  id             String   @id
+  userId         String   @map("user_id")
+  dimension      String
+  requirement    String
+  requiredSkills String[] @map("required_skills")
+  requiredGoals  String[] @map("required_goals")
+  sort           Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dimension])
+  @@map("target_state_requirements")
+}
+
+model FinancialAccount {
+  id        String   @id
+  userId    String   @unique @map("user_id")
+  currency  String   @default("INR")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries FinancialEntry[]
+  goals   SavingsGoal[]
+
+  @@map("financial_accounts")
+}
+
+model FinancialEntry {
+  id           String             @id
+  userId       String             @map("user_id")
+  accountId    String             @map("account_id")
+  kind         FinancialEntryType
+  amount       Decimal            @db.Decimal(12, 2)
+  occurredOn   DateTime           @map("occurred_on") @db.Date
+  category     String?
+  note         String?
+  linkedGoalId String?            @map("linked_goal_id")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  account    FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedGoal Goal?            @relation(fields: [linkedGoalId], references: [id])
+
+  @@index([userId, kind, occurredOn])
+  @@index([accountId])
+  @@map("financial_entries")
+}
+
+model SavingsGoal {
+  id           String    @id
+  userId       String    @map("user_id")
+  accountId    String    @map("account_id")
+  title        String
+  targetAmount Decimal   @map("target_amount") @db.Decimal(12, 2)
+  targetDate   DateTime? @map("target_date") @db.Date
+  status       String    @default("active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  account FinancialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("savings_goals")
+}
+
+model ReadinessDimension {
+  id          String   @id
+  userId      String   @map("user_id")
+  key         String
+  label       String
+  description String?
+  sort        Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requirements ReadinessRequirement[]
+
+  @@unique([userId, key])
+  @@map("readiness_dimensions")
+}
+
+model ReadinessRequirement {
+  id              String   @id
+  userId          String   @map("user_id")
+  dimensionId     String   @map("dimension_id")
+  label           String
+  skillId         String?  @map("skill_id")
+  goalId          String?  @map("goal_id")
+  evidenceSummary String?  @map("evidence_summary")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  dimension ReadinessDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  skill     Skill?             @relation(fields: [skillId], references: [id])
+  goal      Goal?              @relation(fields: [goalId], references: [id])
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([dimensionId])
+  @@map("readiness_requirements")
 }
