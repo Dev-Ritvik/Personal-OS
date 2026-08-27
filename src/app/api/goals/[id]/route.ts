@@ -63,7 +63,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       },
     );
 
-    const childProgress = children.map((c) =>
+    const childProgress = children.map((c: any) =>
       computeGoalProgress(
         {
           measureType: c.measureType,
@@ -77,10 +77,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         { currentUnits: c.currentValue !== null ? Number(c.currentValue) : undefined, today },
       ).value01,
     );
-    const childVals = childProgress.filter((v): v is number => v !== null);
+    const childVals = childProgress.filter((v: number | null): v is number => v !== null);
     const rolled =
       childVals.length > 0
-        ? childVals.reduce((a, b) => a + b, 0) / childVals.length
+        ? childVals.reduce((a: number, b: number) => a + b, 0) / childVals.length
         : null;
 
     return json({
@@ -95,7 +95,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         updatedAt: g.updatedAt.toISOString(),
         progress,
         rollupFromChildren: rolled,
-        children: children.map((c) => ({
+        children: children.map((c: any) => ({
           id: c.id,
           title: c.title,
           kind: c.kind,
@@ -104,13 +104,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           measureType: c.measureType,
           targetDate: c.targetDate?.toISOString().slice(0, 10) ?? null,
         })),
-        tasks: tasks.map((t) => ({
+        tasks: tasks.map((t: any) => ({
           id: t.id,
           title: t.title,
           status: t.status,
           dueDate: t.dueDate?.toISOString().slice(0, 10) ?? null,
         })),
-        behaviorIds: behaviors.map((b) => ({ id: b.id, title: b.title })),
+        behaviorIds: behaviors.map((b: any) => ({ id: b.id, title: b.title })),
       },
     });
   })();

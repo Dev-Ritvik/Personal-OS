@@ -26,7 +26,7 @@ export async function deleteEverything(
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new ApiError(404, "not_found", "Account not found");
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: any) => {
     await tx.financialEntry.deleteMany({ where: { userId } });
     await tx.savingsGoal.deleteMany({ where: { userId } });
     await tx.financialAccount.deleteMany({ where: { userId } });

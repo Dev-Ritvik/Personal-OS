@@ -36,7 +36,7 @@ export async function updateBehavior(
 ) {
   const existing = await prisma.behavior.findFirst({ where: { id, userId, deletedAt: null } });
   if (!existing) throw new ApiError(404, "not_found", "Behavior not found");
-  const data: Prisma.BehaviorUpdateInput = {};
+  const data: Record<string, unknown> = {};
   if (typeof input.title === "string") data.title = input.title;
   if ("goalId" in input) data.goal = input.goalId ? { connect: { id: input.goalId as string } } : { disconnect: true };
   if ("categoryId" in input) data.category = input.categoryId ? { connect: { id: input.categoryId as string } } : { disconnect: true };
@@ -110,7 +110,7 @@ export async function behaviorHistory(userId: string, behaviorId: string, days: 
       localDate: { gte: from, lte: to },
     },
   });
-  return { days, rows: rows.map((r) => ({ ...r, localDate: r.localDate.toISOString().slice(0, 10) })), adHocCount };
+  return { days, rows: rows.map((r: any) => ({ ...r, localDate: r.localDate.toISOString().slice(0, 10) })), adHocCount };
 }
 
 export function nextId(): string {

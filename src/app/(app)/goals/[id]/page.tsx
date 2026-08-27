@@ -94,7 +94,7 @@ export default function GoalDetailPage() {
             <div>
               <h2 className="text-2xs uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>Children</h2>
               <ul className="space-y-1">
-                {g.children.map((c) => (
+                {g.children.map((c: any) => (
                   <li key={c.id}>
                     <Link href={`/goals/${c.id}`} className="text-xs hover:underline">{c.title}</Link>
                   </li>

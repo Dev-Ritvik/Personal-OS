@@ -90,7 +90,7 @@ export async function getSummary(userId: string) {
       runway: null,
       entryCount: 0,
       insufficient: true,
-      savingsGoals: savingsGoals.map((g) => ({
+      savingsGoals: savingsGoals.map((g: any) => ({
         ...g,
         targetAmount: Number(g.targetAmount),
         progress: null,
@@ -99,8 +99,8 @@ export async function getSummary(userId: string) {
     };
   }
 
-  const totalIncome = entries.filter((e) => e.kind === "INCOME").reduce((s, e) => s + Number(e.amount), 0);
-  const totalExpense = entries.filter((e) => e.kind === "EXPENSE").reduce((s, e) => s + Number(e.amount), 0);
+  const totalIncome = entries.filter((e: any) => e.kind === "INCOME").reduce((s: number, e: any) => s + Number(e.amount), 0);
+  const totalExpense = entries.filter((e: any) => e.kind === "EXPENSE").reduce((s: number, e: any) => s + Number(e.amount), 0);
   const savings = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? savings / totalIncome : null;
 
@@ -119,7 +119,7 @@ export async function getSummary(userId: string) {
     runway,
     entryCount: entries.length,
     insufficient: entries.length < 3,
-    savingsGoals: savingsGoals.map((g) => {
+    savingsGoals: savingsGoals.map((g: any) => {
       const progress = totalIncome > 0 ? Math.min(1, savings / Number(g.targetAmount)) : 0;
       return {
         ...g,

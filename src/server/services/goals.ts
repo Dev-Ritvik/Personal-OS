@@ -44,13 +44,13 @@ export async function createGoal(
 
     // Depth ≤ 4 (ARCHITECTURE.md §6.1). Horizon must match tree level:
     // depth1 life → depth2 annual → depth3 quarterly → depth4 leaf.
-    const all = new Map(
+    const all = new Map<string, { id: string; parentId: string | null }>(
       (
         await prisma.goal.findMany({
           where: { userId, deletedAt: null },
           select: { id: true, parentId: true },
         })
-      ).map((g) => [g.id, g]),
+      ).map((g: any) => [g.id, g]),
     );
     const parentDepth = await depthOf(all, parent.id);
     if (parentDepth >= 4) {
@@ -96,7 +96,7 @@ export async function updateGoal(
   const existing = await prisma.goal.findFirst({ where: { id, userId, deletedAt: null } });
   if (!existing) throw new ApiError(404, "not_found", "Goal not found");
 
-  const data: Prisma.GoalUpdateInput = {};
+  const data: Record<string, unknown> = {};
   if (typeof input.title === "string") data.title = input.title;
   if ("description" in input) data.description = (input.description as string) ?? null;
   if ("unit" in input) data.unit = (input.unit as string) ?? null;

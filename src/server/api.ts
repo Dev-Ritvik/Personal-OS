@@ -123,7 +123,7 @@ export async function idempotent<T>(
     const claimed = await prisma.syncOp.updateMany({
       where: {
         clientOpId,
-        response: { equals: Prisma.AnyNull },
+        response: { equals: Prisma.JsonNull },
         receivedAt: existing.receivedAt,
       },
       data: { receivedAt: new Date() },
@@ -154,7 +154,7 @@ export async function idempotent<T>(
     // Ownership-safe response store: only the CURRENT owner (response still
     // null) may write. A superseded caller never clobbers the winner.
     const stored = await prisma.syncOp.updateMany({
-      where: { clientOpId, response: { equals: Prisma.AnyNull } },
+      where: { clientOpId, response: { equals: Prisma.JsonNull } },
       data: { response: result as object },
     });
     if (stored.count === 0) {
@@ -167,7 +167,7 @@ export async function idempotent<T>(
     if (err instanceof ApiError && err.code === "op_superseded") throw err;
     // Never leave a poisoned reservation behind: the op is retryable as-is.
     await prisma.syncOp
-      .deleteMany({ where: { clientOpId, response: { equals: Prisma.AnyNull } } })
+      .deleteMany({ where: { clientOpId, response: { equals: Prisma.JsonNull } } })
       .catch(() => undefined);
     throw err;
   }

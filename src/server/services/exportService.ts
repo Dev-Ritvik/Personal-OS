@@ -53,7 +53,7 @@ export async function exportAll(userId: string): Promise<object> {
     (async () => {
       const goalIds = (
         await prisma.goal.findMany({ where: { userId }, select: { id: true } })
-      ).map((g) => `goal_progress:${g.id}`);
+      ).map((g: any) => `goal_progress:${g.id}`);
       const DAY_KEYS = [
         "waking_minutes", "planned_minutes", "executed_planned_minutes",
         "productive_minutes", "unknown_share", "behavior_scheduled",
@@ -122,7 +122,7 @@ export async function exportAll(userId: string): Promise<object> {
       reflections,
       metricSnapshots,
       interventionLog,
-      sessions: sessions.map((s) => ({ ...s, tokenHash: "[redacted]" })),
+      sessions: sessions.map((s: any) => ({ ...s, tokenHash: "[redacted]" })),
       syncOps,
       auditLog,
       personalProfile,

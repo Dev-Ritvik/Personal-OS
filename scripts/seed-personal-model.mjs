@@ -13,10 +13,22 @@ function id() {
 }
 
 async function main() {
-  const user = await prisma.user.findFirst();
-  if (!user) {
-    console.error("No user found. Complete /bootstrap first.");
-    process.exit(1);
+  const targetEmail = process.env.PERSONAL_MODEL_USER_EMAIL;
+  let user;
+  if (targetEmail) {
+    user = await prisma.user.findUnique({ where: { email: targetEmail.toLowerCase() } });
+    if (!user) {
+      console.error(`No user found with email: ${targetEmail}`);
+      process.exit(1);
+    }
+    console.log("Seeding Personal Model V1 for (explicit):", user.email);
+  } else {
+    const user = await prisma.user.findFirst();
+    if (!user) {
+      console.error("No user found. Complete /bootstrap first or set PERSONAL_MODEL_USER_EMAIL.");
+      process.exit(1);
+    }
+    console.log("Seeding Personal Model V1 for (first user):", user.email);
   }
   console.log("Seeding Personal Model V1 for", user.email);
 
@@ -155,11 +167,10 @@ async function main() {
 
   // ── Skill dependencies — 18 edges §10 ────────────────────────────────
   const skillByName = Object.fromEntries((await prisma.skill.findMany({ where: { userId: user.id }, select: { id: true, name: true } })).map((s) => [s.name, s.id]));
-  const depPairs = [
+const depPairs = [
     ["Professional communication","Spoken English"],
     ["Technical communication","Professional communication"],
     ["Presentation","Technical communication"],
-    ["Scientific methodology","Technical research"],
     ["Technical research","Scientific methodology"],
     ["Scientific writing","Technical research"],
     ["Discovery","Sales"],
@@ -220,6 +231,52 @@ async function main() {
     if (!exists) await prisma.readinessDimension.create({ data: { id: id(), userId: user.id, key: dim.key, label: dim.label, description: dim.description, sort: idx } });
   }
   console.log("  readiness dimensions ✓");
+
+  // ── Readiness requirements (link dimensions to skills/goals) ───────────────
+  const readinessReqs = [
+    { dimension: "academic", skill: "Technical reading" },
+    { dimension: "academic", skill: "Scientific writing" },
+    { dimension: "academic", skill: "Statistics" },
+    { dimension: "technical", skill: "Technical research" },
+    { dimension: "technical", skill: "Machine learning systems" },
+    { dimension: "career", skill: "Resume/CV" },
+    { dimension: "career", skill: "Interviewing" },
+    { dimension: "career", skill: "Technical interviewing" },
+    { dimension: "financial", skill: "Personal finance" },
+    { dimension: "financial", skill: "Budgeting" },
+    { dimension: "independent_living", skill: "Cooking" },
+    { dimension: "independent_living", skill: "Budgeting" },
+    { dimension: "communication", skill: "Professional communication" },
+    { dimension: "communication", skill: "Technical communication" },
+    { dimension: "international", skill: "Cultural adaptability" },
+    { dimension: "international", skill: "Local-language learning" },
+    { dimension: "physical_routine", skill: "Exercise consistency" },
+    { dimension: "physical_routine", skill: "Sleep consistency" },
+  ];
+
+  for (const req of readinessReqs) {
+    const dim = await prisma.readinessDimension.findFirst({ where: { userId: user.id, key: req.dimension } });
+    const skill = req.skill ? await prisma.skill.findFirst({ where: { userId: user.id, name: req.skill } }) : null;
+    if (!dim) continue;
+    if (req.skill && !skill) continue;
+    const exists = await prisma.readinessRequirement.findFirst({
+      where: { dimensionId: dim.id, skillId: skill?.id, goalId: null }
+    });
+    if (!exists) {
+      await prisma.readinessRequirement.create({
+        data: {
+          id: id(),
+          userId: user.id,
+          dimensionId: dim.id,
+          skillId: skill?.id ?? null,
+          goalId: null,
+          label: skill ? `${skill.name} for ${dim.label}` : `Manual check: ${dim.label}`,
+          evidenceSummary: skill ? `Evidence from skill: ${skill.name}` : "Manual verification required",
+        },
+      });
+    }
+  }
+  console.log("  readiness requirements ✓");
 
   // ── SavingsGoal ₹5L ──────────────────────────────────────────────────
   let account = await prisma.financialAccount.findUnique({ where: { userId: user.id } });

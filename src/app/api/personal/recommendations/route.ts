@@ -22,19 +22,19 @@ export const GET = handle(async (req: Request) => {
 
   // Task buckets using timezone-safe date comparison (C2 fix)
   const todayStr = today;
-  const overdue = tasks.filter((t) => t.dueDate && t.dueDate.toISOString().slice(0, 10) < todayStr).length;
-  const todayTasks = tasks.filter((t) => t.dueDate?.toISOString().slice(0, 10) === todayStr).length;
+  const overdue = tasks.filter((t: any) => t.dueDate && t.dueDate.toISOString().slice(0, 10) < todayStr).length;
+  const todayTasks = tasks.filter((t: any) => t.dueDate?.toISOString().slice(0, 10) === todayStr).length;
   const inbox = tasks.length - overdue - todayTasks;
-  const deferredCount = tasks.filter((t) => t.deferredCount >= 3).length;
+  const deferredCount = tasks.filter((t: any) => t.deferredCount >= 3).length;
 
   // Get skills that are UNKNOWN AND linked to active goals via GoalSkillLink
   const goalSkillLinks = await prisma.goalSkillLink.findMany({
     where: { userId: s.id, goal: { status: "active", deletedAt: null } },
     select: { skillId: true },
   });
-  const skillsNeededForActiveGoals = new Set(goalSkillLinks.map((l) => l.skillId));
+  const skillsNeededForActiveGoals = new Set(goalSkillLinks.map((l: any) => l.skillId));
   
-  const skillsNeedingEvidence = skills.filter((sk) => 
+  const skillsNeedingEvidence = skills.filter((sk: any) => 
     sk.currentLevel === "UNKNOWN" && skillsNeededForActiveGoals.has(sk.id)
   ).length;
 
@@ -59,8 +59,8 @@ export const GET = handle(async (req: Request) => {
     insufficient: financialEntries.length < 3,
     progress: (() => {
       if (financialEntries.length < 3 || savingsGoals.length === 0) return null;
-      const income = financialEntries.filter((e) => e.kind === "INCOME").reduce((sum, e) => sum + Number(e.amount), 0);
-      const expense = financialEntries.filter((e) => e.kind === "EXPENSE").reduce((sum, e) => sum + Number(e.amount), 0);
+      const income = financialEntries.filter((e: any) => e.kind === "INCOME").reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+      const expense = financialEntries.filter((e: any) => e.kind === "EXPENSE").reduce((sum: number, e: any) => sum + Number(e.amount), 0);
       const savings = income - expense;
       const target = Number(savingsGoals[0]!.targetAmount);
       return Math.min(1, savings / target);
@@ -74,12 +74,12 @@ export const GET = handle(async (req: Request) => {
     const reqs = dim.requirements;
     if (reqs.length === 0) continue;
     // Simple: if any requirement lacks linked skill/goal evidence, consider blocked
-    const blocked = reqs.some((r) => !r.skillId && !r.goalId);
+    const blocked = reqs.some((r: any) => !r.skillId && !r.goalId);
     if (blocked) readinessBlocked.push(dim.label);
   }
 
   const recommendations = recommend({
-    goals: goals.map((g) => ({
+    goals: goals.map((g: any) => ({
       id: g.id,
       title: g.title,
       status: g.status,

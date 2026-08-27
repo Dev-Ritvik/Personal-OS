@@ -73,7 +73,7 @@ export async function loadRawInputs(
 
   // Value-class resolution: explicit entry category > linked behavior's
   // category > uncategorized (undefined → excluded from categorized sums).
-  const entriesRaw: RawTimeEntry[] = entries.map((e) => ({
+  const entriesRaw: RawTimeEntry[] = entries.map((e: any) => ({
     localDate: e.localDate.toISOString().slice(0, 10),
     durationSec: e.durationSec,
     valueClass:
@@ -82,7 +82,7 @@ export async function loadRawInputs(
       undefined,
   }));
 
-  const plansRaw: RawPlanInstance[] = plans.map((p) => ({
+  const plansRaw: RawPlanInstance[] = plans.map((p: any) => ({
     localDate: p.localDate.toISOString().slice(0, 10),
     refType: p.refType as "behavior" | "task",
     origin: p.origin as RawPlanInstance["origin"],
@@ -92,13 +92,13 @@ export async function loadRawInputs(
   }));
 
   const tasksRaw: RawTask[] = [
-    ...openTasks.map((t) => ({
+    ...openTasks.map((t: any) => ({
       dueDate: t.dueDate!.toISOString().slice(0, 10),
       completedOn: null,
       status: t.status as RawTask["status"],
       deferredCount: t.deferredCount,
     })),
-    ...doneTasks.map((t) => ({
+    ...doneTasks.map((t: any) => ({
       dueDate: null,
       // C9: frozen completion day preferred. Legacy rows (field null) fall
       // back to read-time derivation with the current profile tz — documented,
