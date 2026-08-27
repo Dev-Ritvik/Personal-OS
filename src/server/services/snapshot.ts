@@ -233,7 +233,7 @@ export async function pruneSyncOps(): Promise<number> {
       receivedAt: { lt: cutoff },
       // Never delete an op that has not produced its response yet: it may
       // still be pending on a client queue.
-      NOT: { response: { equals: Prisma.JsonNull } },
+      NOT: { response: { equals: Prisma.AnyNull } },
     },
   });
   return res.count;
