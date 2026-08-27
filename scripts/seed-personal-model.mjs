@@ -141,7 +141,7 @@ async function main() {
             id: id(),
             userId: user.id,
             name,
-            category: category as never,
+            category,
             currentLevel: "UNKNOWN",
             targetLevel: strongSet.has(name) ? "STRONG" : "FUNCTIONAL",
             importance: ["Planning","Routine adherence","Digital distraction control","Sales","Client communication","Technical research","Scientific writing"].includes(name) ? 3 : 2,

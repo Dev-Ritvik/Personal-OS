@@ -20,11 +20,23 @@ export const GET = handle(async (req: Request) => {
     prisma.skill.findMany({ where: { userId: s.id, status: "ACTIVE" } }),
   ]);
 
-  // Task buckets
-  const overdue = tasks.filter((t) => t.dueDate && t.dueDate.toISOString().slice(0, 10) < today).length;
-  const todayTasks = tasks.filter((t) => t.dueDate?.toISOString().slice(0, 10) === today).length;
+  // Task buckets using timezone-safe date comparison (C2 fix)
+  const todayStr = today;
+  const overdue = tasks.filter((t) => t.dueDate && t.dueDate.toISOString().slice(0, 10) < todayStr).length;
+  const todayTasks = tasks.filter((t) => t.dueDate?.toISOString().slice(0, 10) === todayStr).length;
   const inbox = tasks.length - overdue - todayTasks;
   const deferredCount = tasks.filter((t) => t.deferredCount >= 3).length;
+
+  // Get skills that are UNKNOWN AND linked to active goals via GoalSkillLink
+  const goalSkillLinks = await prisma.goalSkillLink.findMany({
+    where: { userId: s.id, goal: { status: "active", deletedAt: null } },
+    select: { skillId: true },
+  });
+  const skillsNeededForActiveGoals = new Set(goalSkillLinks.map((l) => l.skillId));
+  
+  const skillsNeedingEvidence = skills.filter((sk) => 
+    sk.currentLevel === "UNKNOWN" && skillsNeededForActiveGoals.has(sk.id)
+  ).length;
 
   // Metrics: overplanning + variance
   const dates = Array.from({ length: 30 }, (_, i) => {
@@ -39,8 +51,6 @@ export const GET = handle(async (req: Request) => {
     const m8 = overplanningRatio(facts);
     overplanningStatus = m8 as never;
   } catch {}
-
-  const skillsNeedingEvidence = skills.filter((sk) => sk.currentLevel === "UNKNOWN").length;
 
   // Financial summary (lightweight)
   const savingsGoals = await prisma.savingsGoal.findMany({ where: { userId: s.id, status: "active" } });
@@ -76,7 +86,7 @@ export const GET = handle(async (req: Request) => {
       targetDate: g.targetDate?.toISOString().slice(0, 10) ?? null,
       progress01: g.currentValue && g.targetValue ? Math.min(1, Number(g.currentValue) / Number(g.targetValue)) : null,
     })),
-    tasks: { overdue, today: todayTasks, inbox },
+    tasks: { overdue, today: todayTasks, inbox: tasks.length - overdue - todayTasks },
     deferredCount,
     metrics: {
       overplanningRatio: overplanningStatus as never,
