@@ -1,10 +1,12 @@
 import { handle, json, requireSession } from "@/server/api";
 import { prisma } from "@/server/db";
-import { todayInTz } from "@/lib/metrics/dates";
+import { todayInTz, diffDays } from "@/lib/metrics/dates";
 import { buildTrajectory } from "@/lib/personal/trajectory";
 import { computeReadiness } from "@/server/services/readiness";
 import { getSummary as getFinancialSummary } from "@/server/services/financials";
 import { computeGoalProgress } from "@/lib/goals/progress";
+import { goalPace } from "@/lib/metrics/goalPace";
+import { goalProgressObservations } from "@/server/services/snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,7 @@ export const GET = handle(async (req: Request) => {
   });
 
   const progressById = new Map<string, number | null>();
+  const paceById = new Map<string, { status: "ok" | "insufficient_data"; value?: { pace: number } }>();
   for (const g of goals) {
     const v = computeGoalProgress(
       {
@@ -33,6 +36,26 @@ export const GET = handle(async (req: Request) => {
       { currentUnits: g.currentValue !== null ? Number(g.currentValue) : undefined, today },
     ).value01;
     progressById.set(g.id, v);
+    if ((g as any).targetDate && (g as any).targetValue !== null) {
+      try {
+        const startDate = (g as any).startDate?.toISOString().slice(0, 10) ?? null;
+        const observations = await goalProgressObservations(g.id, today, startDate);
+        const remainingUnits = Number((g as any).targetValue) * (1 - Math.min(1, v ?? 0));
+        const remainingDays = Math.max(0, diffDays((g as any).targetDate.toISOString().slice(0, 10), today));
+        const ageDays = startDate ? Math.max(0, diffDays(today, startDate)) : 0;
+        const paceRes = goalPace({
+          remainingUnits,
+          remainingDays,
+          goalAgeDays: ageDays,
+          observations: observations.map((o) => ({ ...o, value: o.value * Number((g as any).targetValue!) })),
+        });
+        paceById.set(g.id, paceRes.status === "ok" ? { status: "ok", value: { pace: paceRes.value!.pace } } : { status: "insufficient_data" });
+      } catch {
+        paceById.set(g.id, { status: "insufficient_data" });
+      }
+    } else {
+      paceById.set(g.id, { status: "insufficient_data" });
+    }
   }
 
   const readiness = await computeReadiness(s.id);
@@ -49,6 +72,7 @@ export const GET = handle(async (req: Request) => {
       status: g.status,
       targetDate: g.targetDate?.toISOString().slice(0, 10) ?? null,
       progress01: progressById.get(g.id) ?? null,
+      pace: paceById.get(g.id) ?? null,
     })),
     readiness: readiness.map((r: any) => ({
       key: r.key,

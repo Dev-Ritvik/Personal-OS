@@ -215,6 +215,26 @@ const depPairs = [
   }
   console.log("  goal-skill links ✓");
 
+  // ── Goal dependencies (Phase 6) — QHR → remote-job, etc. ───────────────
+  const goalDeps = [
+    ["G4 — Remote-job prerequisites", "G1 — QHR-Ecosystem delivery"],
+    ["G4 — Remote-job prerequisites", "G2 — Q1 Scopus paper (AI systems & foundations)"],
+    ["G3 — WUST 2+2 / transfer eligibility", "G6 — CGPA ≥ 8.0"],
+    ["G5 — Earn ₹5,00,000 before Poland", "G4 — Remote-job prerequisites"],
+    ["G8 — Poland living: earn/cover/save/invest", "G5 — Earn ₹5,00,000 before Poland"],
+    ["G8 — Poland living: earn/cover/save/invest", "G4 — Remote-job prerequisites"],
+  ];
+  for (const [goalTitle, dependsOnTitle] of goalDeps) {
+    const gid = goalByTitle[goalTitle];
+    const did = goalByTitle[dependsOnTitle];
+    if (!gid || !did) continue;
+    const exists = await prisma.goalDependency.findFirst({ where: { goalId: gid, dependsOnGoalId: did } });
+    if (!exists) {
+      await prisma.goalDependency.create({ data: { id: id(), userId: user.id, goalId: gid, dependsOnGoalId: did } });
+    }
+  }
+  console.log("  goal dependencies ✓");
+
   // ── Readiness dimensions (8) ─────────────────────────────────────────
   const readinessDims = [
     { key: "academic", label: "Academic", description: "CGPA, research, WUST eligibility" },
@@ -277,6 +297,68 @@ const depPairs = [
     }
   }
   console.log("  readiness requirements ✓");
+
+  // ── Poland Lifestyle Behaviors (Phase 4 — measurable target) ──────────
+  const lifestyleBehaviors = [
+    { title: "Wake 07:00", schedule: { type: "daily" }, target: { unit: "check", aggregation: "count", perDay: 1 } },
+    { title: "Gym", schedule: { type: "weekly", days: [1, 3, 5] }, target: { unit: "session", aggregation: "count", weeklyMin: 3 } },
+    { title: "Cook breakfast", schedule: { type: "daily" }, target: { unit: "meal", aggregation: "count", perDay: 1 } },
+    { title: "Grooming", schedule: { type: "daily" }, target: { unit: "check", aggregation: "count", perDay: 1 } },
+    { title: "House chores", schedule: { type: "weekly", days: [1, 3, 5, 6] }, target: { unit: "session", aggregation: "count", weeklyMin: 4 } },
+    { title: "Walk outside", schedule: { type: "daily" }, target: { unit: "minutes", aggregation: "minutes", perDay: 20 } },
+    { title: "Read 10 pages", schedule: { type: "daily" }, target: { unit: "pages", aggregation: "count", perDay: 10 } },
+    { title: "Sleep 00:00-07:00", schedule: { type: "daily" }, target: { unit: "check", aggregation: "count", perDay: 1 } },
+  ];
+  for (const b of lifestyleBehaviors) {
+    const exists = await prisma.behavior.findFirst({ where: { userId: user.id, title: b.title, deletedAt: null } });
+    if (!exists) {
+      await prisma.behavior.create({
+        data: {
+          id: id(),
+          userId: user.id,
+          title: b.title,
+          schedule: b.schedule,
+          target: b.target,
+          status: "active",
+        },
+      });
+    }
+  }
+  console.log("  Poland lifestyle behaviors ✓");
+
+  // ── TargetStateRequirements (measurable Poland lifestyle) ────────────────
+  const targetReqs = [
+    { dimension: "physical_routine", requirement: "Gym 3×/week", skill: "Exercise consistency" },
+    { dimension: "independent_living", requirement: "Cook daily", skill: "Cooking" },
+    { dimension: "physical_routine", requirement: "Sleep 00:00-07:00", skill: "Sleep consistency" },
+    { dimension: "independent_living", requirement: "House chores 4×/week", skill: "Household management" },
+    { dimension: "independent_living", requirement: "Walk outside daily", skill: "Routine adherence" },
+    { dimension: "career", requirement: "Read 10 pages/night", skill: "Planning" },
+    { dimension: "independent_living", requirement: "Grocery planning", skill: "Grocery management" },
+    { dimension: "financial", requirement: "Budget weekly", skill: "Budgeting" },
+  ];
+  for (const tr of targetReqs) {
+    const dim = await prisma.readinessDimension.findFirst({ where: { userId: user.id, key: tr.dimension } });
+    const skill = await prisma.skill.findFirst({ where: { userId: user.id, name: tr.skill } });
+    if (!dim || !skill) continue;
+    const exists = await prisma.targetStateRequirement.findFirst({
+      where: { userId: user.id, dimension: tr.dimension, requirement: tr.requirement },
+    });
+    if (!exists) {
+      await prisma.targetStateRequirement.create({
+        data: {
+          id: id(),
+          userId: user.id,
+          dimension: tr.dimension,
+          requirement: tr.requirement,
+          requiredSkills: [skill.name],
+          requiredGoals: [],
+          sort: 0,
+        },
+      });
+    }
+  }
+  console.log("  target state requirements ✓");
 
   // ── SavingsGoal ₹5L ──────────────────────────────────────────────────
   let account = await prisma.financialAccount.findUnique({ where: { userId: user.id } });

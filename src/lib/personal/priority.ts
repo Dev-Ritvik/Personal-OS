@@ -75,6 +75,7 @@ export function prioritizeTasks(
   tasks: PrioritizableTask[],
   goalsById: Map<string, GoalContext>,
   today: string,
+  opts?: { targetStateTaskIds?: Set<string> },
 ): RankedTask[] {
   const scored = tasks.map((t) => {
     const goal = t.goalId ? (goalsById.get(t.goalId) ?? null) : null;
@@ -115,6 +116,12 @@ export function prioritizeTasks(
       if (goal.horizon === "quarterly") score += 8;
       else if (goal.horizon === "annual") score += 5;
       else if (goal.horizon === "life") score += 2;
+    }
+
+    // 6. Target-state relevance — tasks that build Poland lifestyle readiness
+    if (opts?.targetStateTaskIds?.has(t.id)) {
+      score += 15;
+      reason += " · supports Poland target lifestyle";
     }
 
     // Small tie-breaker: lower estimate first (quick wins) is NOT assumed — we prefer explicit estimate neutrality

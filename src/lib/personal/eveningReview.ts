@@ -72,24 +72,43 @@ export function buildEveningReview(input: ReviewInput): EveningReview {
 
   let inference: string | null = null;
   let recommendation: string | null = null;
+  let hypothesis: string | null = null;
 
   if (planned !== null && executed !== null && planned > 0) {
     if (executionRatio !== null && executionRatio < 0.6) {
       inference = `Planned ${planned} min but executed ${executed} min — execution ratio ${Math.round(executionRatio * 100)}%.`;
+      // Hypothesis: evidence-backed, never causal
+      if (unknownShare !== null && unknownShare > 0.4) {
+        hypothesis = `Execution shortfall coincided with ${Math.round(unknownShare * 100)}% unknown time — large uncategorized period.`;
+      } else if (chronic > 0) {
+        hypothesis = `Shortfall coincided with ${chronic} chronically deferred task(s) — repeated deferral pattern.`;
+      } else if (planned > 180 && executed < 90) {
+        hypothesis = `Shortfall on a heavily planned day — possible overplanning.`;
+      }
       if (chronic > 0) {
         recommendation = `You have ${chronic} chronically deferred task(s). Decompose or explicitly drop the oldest before planning tomorrow.`;
       } else if (planned > productiveMin + 60) {
         recommendation = `Planned workload exceeds today's recorded productive time by ${planned - productiveMin} min. Reduce tomorrow's planned deep work.`;
+      } else if (hypothesis) {
+        recommendation = `Tomorrow, schedule fewer deep-work commitments and explicitly capture interruptions.`;
       } else {
         recommendation = `Protect the highest-value milestone tomorrow and timebox it first.`;
       }
+      if (hypothesis) inference += ` Hypothesis: ${hypothesis}`;
     } else if (executionRatio !== null && executionRatio > 1.2) {
       inference = `Executed ${executed} min vs planned ${planned} min — over-executed by ${Math.round((executionRatio - 1) * 100)}%.`;
       recommendation = `Your plan may be under-estimating; review estimates for recurring tasks.`;
+    } else if (unknownShare !== null && unknownShare > 0.5) {
+      inference = `Executed ${executed} min of ${planned} min — plan met, but ${Math.round(unknownShare * 100)}% of waking time remains unlogged.`;
+      recommendation = `Improve categorization to reduce unknown time.`;
     }
   } else if (planned === null) {
     inference = `No plan was recorded for today — nothing to compare against actual.`;
     recommendation = `Define 1-3 scheduled behaviors to make tomorrow's plan vs actual measurable.`;
+    if (unknownShare !== null && unknownShare > 0.5) {
+      hypothesis = `Large unknown time (${Math.round(unknownShare * 100)}%) with no plan — day not measurable.`;
+      inference += ` Hypothesis: ${hypothesis}`;
+    }
   }
 
   const missedCommitments: string[] = [];

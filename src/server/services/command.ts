@@ -14,6 +14,9 @@ import { estimateCapacity, todayPlannedMinutes, overplanningSeverity } from "@/l
 import { prioritizeTasks } from "@/lib/personal/priority";
 import { buildTrajectory } from "@/lib/personal/trajectory";
 import { computeGoalProgress } from "@/lib/goals/progress";
+import { goalPace } from "@/lib/metrics/goalPace";
+import { diffDays } from "@/lib/metrics/dates";
+import { goalProgressObservations } from "./snapshot";
 import { computeReadiness } from "./readiness";
 import { getSummary as getFinancialSummary } from "./financials";
 
@@ -53,6 +56,7 @@ export async function assembleCommandBrief(
   })) as any[];
 
   const goalProgressById = new Map<string, number | null>();
+  const goalPaceById = new Map<string, { status: "ok" | "insufficient_data"; value?: { pace: number } }>();
   for (const g of goals) {
     const p = computeGoalProgress(
       {
@@ -67,6 +71,32 @@ export async function assembleCommandBrief(
       { currentUnits: g.currentValue !== null ? Number(g.currentValue) : undefined, today },
     ).value01;
     goalProgressById.set(g.id, p);
+
+    // M11 pace for trajectory epistemic correction (Phase 1) — only for dated goals
+    if (g.targetDate && g.targetValue !== null) {
+      try {
+        const startDate = g.startDate?.toISOString().slice(0, 10) ?? null;
+        const observations = await goalProgressObservations(g.id, today, startDate);
+        const remainingUnits = Number(g.targetValue) * (1 - Math.min(1, p ?? 0));
+        const remainingDays = Math.max(0, diffDays(g.targetDate.toISOString().slice(0, 10), today));
+        const ageDays = startDate ? Math.max(0, diffDays(today, startDate)) : Math.max(0, diffDays(today, (g as any).createdAt?.toISOString().slice(0, 10) ?? today));
+        const paceRes = goalPace({
+          remainingUnits,
+          remainingDays,
+          goalAgeDays: ageDays,
+          observations: observations.map((o) => ({ ...o, value: o.value * Number(g.targetValue!) })),
+        });
+        if (paceRes.status === "ok") {
+          goalPaceById.set(g.id, { status: "ok", value: { pace: paceRes.value!.pace } });
+        } else {
+          goalPaceById.set(g.id, { status: "insufficient_data" });
+        }
+      } catch {
+        goalPaceById.set(g.id, { status: "insufficient_data" });
+      }
+    } else {
+      goalPaceById.set(g.id, { status: "insufficient_data" });
+    }
   }
 
   const goalsById = new Map(
@@ -93,18 +123,39 @@ export async function assembleCommandBrief(
     estimateMin: t.estimateMin,
   }));
 
-  const ranked = prioritizeTasks(prioritizable, goalsById, today);
-  const top3 = ranked.slice(0, 3);
-
-  // Goal mapping for each prioritized task: also fetch required skills
-  const taskSkillLinks = await prisma.taskSkillLink.findMany({
-    where: { userId: user.id, taskId: { in: top3.map((t) => t.id) } },
+  // Target-state relevance: tasks whose skills are needed for not-READY readiness dimensions
+  const readinessForPriority = await computeReadiness(user.id);
+  const neededSkillIds = new Set(
+    readinessForPriority
+      .filter((r: any) => r.status !== "READY" && r.status !== "UNKNOWN")
+      .flatMap((r: any) => r.requirements?.filter((req: any) => req.skillId).map((req: any) => req.skillId) ?? []),
+  );
+  // Fetch all task/goal skill links for the 100 tasks to evaluate target-state relevance
+  const allTaskSkillLinks = await prisma.taskSkillLink.findMany({
+    where: { userId: user.id, taskId: { in: tasks.map((t) => t.id) } },
     select: { taskId: true, skillId: true },
   });
-  const goalSkillLinks = await prisma.goalSkillLink.findMany({
-    where: { userId: user.id, goalId: { in: top3.map((t) => t.goalId).filter(Boolean) as string[] } },
-    select: { goalId: true, skillId: true },
-  });
+  const allGoalIds = [...new Set(tasks.map((t) => t.goalId).filter(Boolean) as string[])];
+  const allGoalSkillLinks = allGoalIds.length
+    ? await prisma.goalSkillLink.findMany({ where: { userId: user.id, goalId: { in: allGoalIds } }, select: { goalId: true, skillId: true } })
+    : [];
+  const targetStateTaskIds = new Set(
+    prioritizable
+      .filter((t) => {
+        const taskSkills = allTaskSkillLinks.filter((l) => l.taskId === t.id).map((l) => l.skillId);
+        const goalSkills = t.goalId ? allGoalSkillLinks.filter((l) => l.goalId === t.goalId).map((l) => l.skillId) : [];
+        const allSkills = [...taskSkills, ...goalSkills];
+        return allSkills.some((sid) => neededSkillIds.has(sid));
+      })
+      .map((t) => t.id),
+  );
+
+  const ranked = prioritizeTasks(prioritizable, goalsById, today, { targetStateTaskIds });
+  const top3 = ranked.slice(0, 3);
+
+  // Goal mapping for each prioritized task: also fetch required skills (reuse already fetched)
+  const taskSkillLinks = allTaskSkillLinks.filter((l) => top3.some((t) => t.id === l.taskId));
+  const goalSkillLinks = allGoalSkillLinks.filter((l) => top3.some((t) => t.goalId === l.goalId));
   const skillIds = [...new Set([...taskSkillLinks.map((l) => l.skillId), ...goalSkillLinks.map((l) => l.skillId)])];
   const skills = skillIds.length
     ? await prisma.skill.findMany({ where: { id: { in: skillIds }, userId: user.id }, select: { id: true, name: true, currentLevel: true } })
@@ -123,8 +174,8 @@ export async function assembleCommandBrief(
     return { ...t, goal, skills: taskSkills };
   });
 
-  // Readiness for trajectory
-  const readiness = await computeReadiness(user.id);
+  // Readiness for trajectory (reuse already computed)
+  const readiness = readinessForPriority;
   const financial = await getFinancialSummary(user.id);
 
   const trajectory = buildTrajectory({
@@ -136,6 +187,7 @@ export async function assembleCommandBrief(
       status: g.status,
       targetDate: g.targetDate?.toISOString().slice(0, 10) ?? null,
       progress01: goalProgressById.get(g.id) ?? null,
+      pace: goalPaceById.get(g.id) ?? null,
     })),
     readiness: readiness.map((r: any) => ({
       key: r.key,
@@ -164,6 +216,30 @@ export async function assembleCommandBrief(
   if (trajectory.bottlenecks.length > 0) risks.push(`Bottleneck: ${trajectory.bottlenecks[0]}`);
   if (capacity.status !== "ok") risks.push(`Insufficient data for capacity — log consistently for 14 days.`);
 
+  // Phase 7: Cold-start mode — explicit assumption when no capacity
+  const coldStart = capacity.status !== "ok";
+  const assumedCapacity = 90; // conservative 90 min deep work, labeled ASSUMPTION
+  const effectiveCapacity = capacity.status === "ok" ? capacity.value!.medianProductiveMin : assumedCapacity;
+
+  // Phase 8: Task-load vs capacity (using estimateMin where available)
+  const estimatedLoad = prioritizable.reduce((sum, t) => sum + (t.estimateMin ?? 0), 0);
+  const hasEstimates = prioritizable.some((t) => t.estimateMin !== null && t.estimateMin > 0);
+  const unknownDurationCount = prioritizable.filter((t) => t.estimateMin == null).length;
+  let loadVsCapacity: { ratio: number | null; severity: string; message: string } | null = null;
+  if (hasEstimates && estimatedLoad > 0) {
+    const ratio = estimatedLoad / effectiveCapacity;
+    let severity = "ok";
+    let message = "";
+    if (ratio > 2) { severity = "critical"; message = `Task load ${estimatedLoad} min is ~${ratio.toFixed(1)}× ${coldStart ? "assumed" : "observed"} capacity ${effectiveCapacity} min — drop lowest-value task.`; }
+    else if (ratio > 1.2) { severity = "warning"; message = `Task load ${estimatedLoad} min exceeds ${coldStart ? "assumed" : "observed"} capacity ${effectiveCapacity} min by ${Math.round((ratio - 1) * 100)}%.`; }
+    else { severity = "ok"; message = `Task load ${estimatedLoad} min within ${coldStart ? "assumed" : "observed"} capacity ${effectiveCapacity} min.`; }
+    if (unknownDurationCount > 0) message += ` (${unknownDurationCount} tasks have UNKNOWN_DURATION)`;
+    loadVsCapacity = { ratio, severity, message };
+    if (severity !== "ok") risks.push(message);
+  } else if (prioritizable.length > 0) {
+    loadVsCapacity = { ratio: null, severity: "insufficient", message: "Task load unknown — add estimates to compare against capacity." };
+  }
+
   return {
     today,
     timezone: user.timezone,
@@ -177,9 +253,15 @@ export async function assembleCommandBrief(
       overplan,
       gates: capacity.gates,
       meta: capacity.meta,
+      coldStart,
+      assumedCapacity: coldStart ? assumedCapacity : null,
+      effectiveCapacity,
+      epistemic: coldStart ? "ASSUMPTION" : "STATISTICAL_INFERENCE",
     },
     prioritizedTasks: tasksWithContext,
     allRankedCount: ranked.length,
+    loadVsCapacity,
+    coldStart,
     trajectory: {
       next90Days: trajectory.next90Days.slice(0, 3),
       bottlenecks: trajectory.bottlenecks.slice(0, 2),

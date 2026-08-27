@@ -25,10 +25,10 @@ export interface CapacityEstimate {
 const META: MetricMeta = {
   key: "realistic_capacity",
   label: "Realistic capacity",
-  formula: "median(productive minutes) over 28d logged days; gates: ≥5 logged in 14d, ≥14 logged in 28d, non-zero median",
+  formula: "median(productive minutes) over 28d productive observed days; gates: ≥5 productive 14d, ≥14 productive 28d, ≥5 obs 28d, non-zero median; planned-only days not counted",
   epistemic: "statistical_inference",
   interpretation: "Typical sustainable productive minutes, not a target.",
-  limitation: "Assumes recent logged days represent typical capacity; excludes unlogged days.",
+  limitation: "Excludes planned-only and zero-productive days; assumes observed productive days represent typical capacity.",
 };
 
 function quantile(sorted: number[], q: number): number {
@@ -46,16 +46,22 @@ export function estimateCapacity(facts: DayFact[]): MetricResult<CapacityEstimat
   const last14 = facts.slice(-14);
   const last28 = facts.slice(-28);
 
-  const logged14 = last14.filter((f) => f.categorizedByClass.productive > 0 || f.plannedMinutes !== null).length;
-  // Logged = any day with >0 productive OR a plan existed (even if 0 executed)
+  // Phase 2 correction: separate populations
+  // - productive observed day: productive>0 (only these count for capacity median)
+  // - planned day: plannedMinutes !== null (not counted as productive evidence)
+  // - zero-productivity day: productive===0 (explicit 0, not missing)
+  // - observed/logged day: any with waking or planned or categorized >0
+  // Capacity uses ONLY productive observed days — a planned-only day is NOT evidence.
   const productive14 = last14.filter((f) => f.categorizedByClass.productive > 0).length;
   const productive28Vals = last28
     .map((f) => f.categorizedByClass.productive)
     .filter((v) => v > 0);
+  const planned14 = last14.filter((f) => f.plannedMinutes !== null).length;
+  void planned14; // distinct from productive, not used for capacity gates
 
   const gates: GateCheck[] = [
-    gate("logged days in 14d (≥5)", logged14, 5),
-    gate("logged days in 28d (≥14)", last28.filter((f) => f.categorizedByClass.productive > 0 || f.plannedMinutes !== null).length, 14),
+    gate("productive days in 14d (≥5)", productive14, 5),
+    gate("productive days in 28d (≥14)", productive28Vals.length, 14),
     gate("productive observations 28d (≥5)", productive28Vals.length, 5),
   ];
 

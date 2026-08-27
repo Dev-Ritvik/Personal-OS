@@ -91,4 +91,104 @@ describe("buildTrajectory", () => {
     const view = buildTrajectory({ today, goals: [], readiness: [], financial: null, currentState: [], targetState: [] });
     expect(view.milestones.some((m) => m.kind === "lifestyle" && m.date === "2027-11-01")).toBe(true);
   });
+
+  // Phase 1 — M11 pace-aware epistemic correction (7 required cases)
+  it("1. distant deadline + zero observed velocity → at_risk (M11 pace 0)", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "DistantZero", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.31, pace: { status: "ok", value: { pace: 0 } } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "DistantZero")?.status).toBe("at_risk");
+  });
+
+  it("2. 31% progress + zero recent progress (pace 0) → at_risk", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "ThirtyOne", horizon: "annual", status: "active", targetDate: "2027-02-27", progress01: 0.31, pace: { status: "ok", value: { pace: 0 } } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "ThirtyOne")?.status).toBe("at_risk");
+  });
+
+  it("3. near deadline + insufficient observation window → insufficient_data", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "NearInsufficient", horizon: "quarterly", status: "active", targetDate: "2026-09-10", progress01: 0.2, pace: { status: "insufficient_data" } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "NearInsufficient")?.status).toBe("insufficient_data");
+  });
+
+  it("4. healthy velocity (pace 1.2) → on_track", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "Healthy", horizon: "quarterly", status: "active", targetDate: "2026-11-01", progress01: 0.6, pace: { status: "ok", value: { pace: 1.2 } } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "Healthy")?.status).toBe("on_track");
+  });
+
+  it("5. overdue goal → blocked", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "OverduePace", horizon: "annual", status: "active", targetDate: "2026-08-20", progress01: 0.9, pace: { status: "ok", value: { pace: 0.9 } } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "OverduePace")?.status).toBe("blocked");
+  });
+
+  it("6. achieved goal → done regardless of pace", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "DoneGoal", horizon: "annual", status: "achieved", targetDate: "2026-09-10", progress01: 1, pace: { status: "ok", value: { pace: 0 } } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "DoneGoal")?.status).toBe("done");
+  });
+
+  it("7. insufficient observation window → insufficient_data (not on_track)", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "NoWindow", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.6, pace: { status: "insufficient_data" } }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    expect(view.milestones.find((m) => m.label === "NoWindow")?.status).toBe("insufficient_data");
+  });
+
+  it("distant low progress without pace → insufficient_data not on_track (no fabrication)", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [{ id: "g1", title: "DistantLowNoPace", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.2, pace: null }],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+    });
+    // 400d left, 20% progress, no pace evidence → must not claim on_track
+    const m = view.milestones.find((mm) => mm.label === "DistantLowNoPace");
+    expect(["at_risk", "insufficient_data"].includes(m!.status)).toBe(true);
+    expect(m!.status).not.toBe("on_track");
+  });
 });

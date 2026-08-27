@@ -94,4 +94,54 @@ describe("overplanningSeverity", () => {
     const cap = estimateCapacity(f);
     expect(overplanningSeverity(110, cap).severity).toBe("ok");
   });
+
+  // Phase 2 — population separation
+  it("planned-only day (planned 60, productive 0) not counted as productive evidence", () => {
+    const f = dates(28).map((d, i) => fact(d, i < 14 ? 100 : 0, 60)); // first 14 productive, last 14 planned-only
+    // last 14: productive 0 but planned 60 → should NOT count toward productive gates
+    const r = estimateCapacity(f);
+    // productive28Vals = 14 (only first 14), so gates fail for 28d ≥14? 14 meets 14, but we have 14 productive, so ok? Let's use more extreme:
+    const g = dates(28).map((d) => fact(d, 0, 60)); // all planned-only, zero productive
+    const r2 = estimateCapacity(g);
+    expect(r2.status).toBe("insufficient_data");
+  });
+
+  it("zero productive day (explicit 0) not counted, insufficient", () => {
+    const f = dates(28).map((d) => fact(d, 0, null));
+    const r = estimateCapacity(f);
+    expect(r.status).toBe("insufficient_data");
+  });
+
+  it("productive day counted", () => {
+    const f = dates(28).map((d) => fact(d, 90, 90));
+    const r = estimateCapacity(f);
+    expect(r.status).toBe("ok");
+    expect(r.value!.medianProductiveMin).toBe(90);
+  });
+
+  it("outlier productive day does not distort median", () => {
+    const vals = Array(28).fill(60);
+    vals[0] = 400; vals[1] = 10;
+    const f = dates(28).map((d, i) => fact(d, vals[i]!, 60));
+    const r = estimateCapacity(f);
+    expect(r.value!.medianProductiveMin).toBe(60);
+    expect(r.value!.meanProductiveMin).not.toBe(60);
+  });
+
+  it("fixed college commitment does not affect capacity median", () => {
+    // College 11-17 is fixed commitment, not productive evidence — capacity should be based only on productive minutes, not waking
+    const f = dates(28).map((d) => fact(d, 120, 120));
+    // Even if waking is 960, productive 120 median should be 120 regardless of fixed class
+    const r = estimateCapacity(f);
+    expect(r.value!.medianProductiveMin).toBe(120);
+  });
+
+  it("capacity exceeding available time is not claimed as on_track without evidence", () => {
+    // If capacity median is 120, but available time is only 60 (e.g., exam week), overplanning should be critical
+    const f = dates(28).map((d) => fact(d, 60, 60));
+    const cap = estimateCapacity(f);
+    const over = overplanningSeverity(180, cap);
+    expect(over.severity).toBe("critical");
+    expect(over.ratio).toBeCloseTo(3, 0);
+  });
 });

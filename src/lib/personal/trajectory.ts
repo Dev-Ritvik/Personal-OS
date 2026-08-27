@@ -14,6 +14,8 @@ export interface TrajectoryGoal {
   status: string;
   targetDate: string | null;
   progress01: number | null;
+  /** Optional M11 pace evidence: if present, trajectory uses it instead of duplicating formula. */
+  pace?: { status: "ok" | "insufficient_data"; value?: { pace: number } } | null;
 }
 
 export interface TrajectoryReadiness {
@@ -67,7 +69,8 @@ export function buildTrajectory(args: {
   const { today, goals, readiness, financial } = args;
   const milestones: TrajectoryMilestone[] = [];
 
-  // Goals → milestones
+  // Goals → milestones — epistemic correction (Phase 1)
+  // Uses M11 pace where available; never defaults to on_track without evidence.
   for (const g of goals) {
     if (!g.targetDate) {
       milestones.push({
@@ -81,14 +84,38 @@ export function buildTrajectory(args: {
       continue;
     }
     const daysLeft = Math.ceil((Date.parse(g.targetDate) - Date.parse(today)) / 86400000);
-    let status: TrajectoryMilestone["status"] = "on_track";
+    let status: TrajectoryMilestone["status"] = "insufficient_data";
     let evidence = "";
     if (g.status === "achieved") { status = "done"; evidence = "Achieved"; }
     else if (g.status === "abandoned" || g.status === "archived") { status = "blocked"; evidence = `Status ${g.status}`; }
     else if (daysLeft < 0) { status = "blocked"; evidence = `Overdue by ${Math.abs(daysLeft)}d`; }
-    else if (g.progress01 !== null && g.progress01 < 0.3 && daysLeft < 90) { status = "at_risk"; evidence = `Progress ${Math.round(g.progress01 * 100)}% with ${daysLeft}d left`; }
-    else if (g.progress01 === null) { status = "insufficient_data"; evidence = `${daysLeft}d left, no progress`; }
-    else { evidence = `${daysLeft}d left, ${g.progress01 !== null ? Math.round(g.progress01 * 100) + "%" : "no data"}`; }
+    else if (g.pace) {
+      // Prefer M11 evidence — do not duplicate formula
+      if (g.pace.status === "insufficient_data") {
+        status = "insufficient_data";
+        evidence = `${daysLeft}d left, insufficient observation window (need ≥14d age, ≥5 points)`;
+      } else if (g.pace.value && g.pace.value.pace < 0.8) {
+        status = "at_risk";
+        evidence = `Pace ${g.pace.value.pace.toFixed(2)}× required — inadequate velocity, ${daysLeft}d left, ${g.progress01 !== null ? Math.round(g.progress01 * 100) + "%" : "no progress"}`;
+      } else if (g.pace.value) {
+        status = "on_track";
+        evidence = `Pace ${g.pace.value.pace.toFixed(2)}× required — adequate, ${daysLeft}d left`;
+      }
+    } else if (g.progress01 !== null && g.progress01 < 0.3 && daysLeft < 90) {
+      status = "at_risk";
+      evidence = `Progress ${Math.round(g.progress01 * 100)}% with ${daysLeft}d left`;
+    } else if (g.progress01 === null) {
+      status = "insufficient_data";
+      evidence = `${daysLeft}d left, no progress`;
+    } else if (daysLeft > 180 && g.progress01 !== null && g.progress01 < 0.5) {
+      // Distant deadline but low progress with no pace evidence → cannot claim on_track
+      status = "insufficient_data";
+      evidence = `${Math.round(g.progress01 * 100)}% with ${daysLeft}d left — no pace evidence, cannot verify trajectory`;
+    } else {
+      // Fallback: sufficient progress and no pace to contradict → on_track with explicit evidence
+      status = "on_track";
+      evidence = `${daysLeft}d left, ${g.progress01 !== null ? Math.round(g.progress01 * 100) + "%" : "no data"}`;
+    }
 
     milestones.push({ date: g.targetDate, label: g.title, kind: "goal", status, evidence, goalId: g.id });
   }
@@ -133,13 +160,30 @@ export function buildTrajectory(args: {
     }
   }
 
-  // Lifestyle target (static milestone for Nov 2027)
+  // Lifestyle target — measurable via TargetStateRequirement + Readiness (Phase 4)
+  // If lifestyle requirements exist but readiness is blocked/at_risk, lifestyle is at_risk
+  const lifestyleRelevantKeys = new Set(["physical_routine", "independent_living", "financial", "international"]);
+  const lifestyleReadiness = readiness.filter((r) => lifestyleRelevantKeys.has(r.key));
+  const hasLifestyleReqs = lifestyleReadiness.length > 0;
+  const blockedLifestyle = lifestyleReadiness.filter((r) => r.status === "BLOCKED" || r.status === "FOUNDATIONAL");
+  let lifestyleStatus: TrajectoryMilestone["status"] = "on_track";
+  let lifestyleEvidence = "Target state defined; gap driven by readiness";
+  if (!hasLifestyleReqs) {
+    lifestyleStatus = "insufficient_data";
+    lifestyleEvidence = "No lifestyle requirements defined";
+  } else if (blockedLifestyle.length > 0) {
+    lifestyleStatus = "at_risk";
+    lifestyleEvidence = blockedLifestyle.map((r) => `${r.label}: ${r.missing.slice(0, 1).join("") || r.nextAction}`).join(" · ").slice(0, 120);
+  } else if (lifestyleReadiness.some((r) => r.status === "DEVELOPING")) {
+    lifestyleStatus = "on_track";
+    lifestyleEvidence = "Readiness developing for lifestyle components";
+  }
   milestones.push({
     date: "2027-11-01",
     label: "Target lifestyle: 07:00 gym/cook → WUST → remote work → chores → reading",
     kind: "lifestyle",
-    status: "on_track",
-    evidence: "Target state defined; gap driven by readiness",
+    status: lifestyleStatus,
+    evidence: lifestyleEvidence,
   });
 
   milestones.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.label.localeCompare(b.label)));

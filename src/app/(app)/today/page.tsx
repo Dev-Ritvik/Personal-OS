@@ -209,7 +209,7 @@ function CommandBrief() {
   return (
     <section className="panel rounded p-4 border-l-2" style={{ borderLeftColor: "var(--accent)" }}>
       <h2 className="text-xs uppercase tracking-wider mb-2" style={{ color: "var(--faint)" }}>
-        Command Brief — What matters today (strict)
+        Command Brief — What matters today (strict, ordered not scored, evidence carries reason)
       </h2>
       <ul className="space-y-2">
         {data.slice(0, 3).map((rec: any, i: number) => (
@@ -253,16 +253,22 @@ function EnhancedCommandBrief() {
           <div className="num mt-0.5" style={{ color: "var(--muted)" }}>Best window: early morning · Sleep 22:00–07:00 (consistency 8/10)</div>
         </div>
         <div className="panel-2 rounded p-2">
-          <div className="uppercase tracking-wider" style={{ color: "var(--faint)" }}>Capacity</div>
+          <div className="uppercase tracking-wider" style={{ color: "var(--faint)" }}>Capacity · <span className="normal-case" style={{ color: data.capacity.coldStart ? "var(--warn)" : "var(--faint)" }}>{data.capacity.coldStart ? "ASSUMPTION 90 min" : data.capacity.epistemic}</span></div>
           {data.capacity.status === "ok" ? (
             <>
               <div className="text-xs font-medium mt-1">Median {data.capacity.median} min · P25 {data.capacity.p25} · P75 {data.capacity.p75}</div>
               <div className="num mt-0.5" style={{ color: data.capacity.overplan.severity === "critical" ? "var(--bad)" : data.capacity.overplan.severity === "warning" ? "var(--warn)" : "var(--muted)" }}>
                 Planned today: {data.capacity.plannedToday ?? "—"} min {data.capacity.overplan.ratio ? `· ${Math.round(data.capacity.overplan.ratio * 100) / 100}× median` : ""} {data.capacity.overplan.severity !== "ok" && data.capacity.overplan.severity !== "insufficient" ? `· ${data.capacity.overplan.severity}` : ""}
               </div>
+              {data.loadVsCapacity && <div className="text-2xs num mt-0.5" style={{ color: data.loadVsCapacity.severity === "critical" ? "var(--bad)" : data.loadVsCapacity.severity === "warning" ? "var(--warn)" : "var(--muted)" }}>{data.loadVsCapacity.message}</div>}
             </>
           ) : (
-            <div className="text-2xs mt-1" style={{ color: "var(--faint)" }}>Insufficient data — log consistently for 14 days. Gates: {data.capacity.gates?.filter((g:any)=>!g.passed).map((g:any)=>g.name).join(", ") || "—"}</div>
+            <>
+              <div className="text-2xs mt-1" style={{ color: "var(--faint)" }}>Measured capacity not available yet — insufficient data. Gates: {data.capacity.gates?.filter((g:any)=>!g.passed).map((g:any)=>g.name).join(", ") || "—"}</div>
+              <div className="text-2xs font-medium mt-1" style={{ color: "var(--warn)" }}>Temporary assumption: {data.capacity.assumedCapacity} min deep work (ASSUMPTION — not measured)</div>
+              <div className="text-2xs num mt-0.5" style={{ color: "var(--muted)" }}>Once ≥5 productive days in 14d and ≥14 in 28d, assumption → observed capacity.</div>
+              {data.loadVsCapacity && <div className="text-2xs num mt-1" style={{ color: "var(--muted)" }}>{data.loadVsCapacity.message}</div>}
+            </>
           )}
         </div>
         <div className="panel-2 rounded p-2">
@@ -284,7 +290,7 @@ function EnhancedCommandBrief() {
 
       {/* Highest-value tasks with goal/skill mapping */}
       <div>
-        <div className="text-2xs uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>Highest-value today — adaptive prioritization (goal deadline · deferral · horizon · progress deficit)</div>
+        <div className="text-2xs uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>Highest-value today — priority by deadline, deferral, horizon, progress deficit, and Poland target-state relevance (ordered, not scored)</div>
         {data.prioritizedTasks.length === 0 ? (
           <p className="text-2xs" style={{ color: "var(--faint)" }}>No tasks due. Create tasks linked to goals to see prioritization.</p>
         ) : (

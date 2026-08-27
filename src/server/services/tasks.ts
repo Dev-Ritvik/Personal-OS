@@ -65,6 +65,56 @@ export async function updateTask(
 
   const updated = await prisma.task.update({ where: { id }, data });
   await audit(userId, "update", "task", id, input);
+
+  // Phase 5: task completion → SkillEvidence (FACT, not auto-promotion)
+  if (existing.status !== "done" && input.status === "done") {
+    const links = await prisma.taskSkillLink.findMany({ where: { taskId: id, userId } });
+    for (const link of links) {
+      // Duplicate protection: one evidence per task per skill
+      const existingEv = await prisma.skillEvidence.findFirst({
+        where: { skillId: link.skillId, sourceType: "task", sourceId: id },
+      });
+      if (!existingEv) {
+        await prisma.skillEvidence.create({
+          data: {
+            id: uuidv7(),
+            userId,
+            skillId: link.skillId,
+            title: `Completed task: ${existing.title}`,
+            description: `Task "${existing.title}" completed — evidence for skill via TaskSkillLink`,
+            epistemicClass: "FACT",
+            sourceType: "task",
+            sourceId: id,
+            assessedLevel: null,
+          },
+        });
+      }
+    }
+    // Also via GoalSkillLink if task has goal
+    if (existing.goalId) {
+      const goalLinks = await prisma.goalSkillLink.findMany({ where: { goalId: existing.goalId, userId } });
+      for (const gl of goalLinks) {
+        const exists = await prisma.skillEvidence.findFirst({
+          where: { skillId: gl.skillId, sourceType: "task", sourceId: id },
+        });
+        if (!exists) {
+          await prisma.skillEvidence.create({
+            data: {
+              id: uuidv7(),
+              userId,
+              skillId: gl.skillId,
+              title: `Completed task for goal: ${existing.title}`,
+              description: `Task completed advancing goal "${gl.goalId}"`,
+              epistemicClass: "FACT",
+              sourceType: "task",
+              sourceId: id,
+            },
+          });
+        }
+      }
+    }
+  }
+
   return updated;
 }
 

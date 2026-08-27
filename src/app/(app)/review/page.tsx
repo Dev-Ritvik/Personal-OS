@@ -18,7 +18,7 @@ export default function ReviewPage() {
     <div className="space-y-4">
       <header>
         <h1 className="text-lg font-semibold">Evening Review</h1>
-        <p className="text-2xs num" style={{ color: "var(--faint)" }}>What happened, what was missed, why, and what should change tomorrow — facts vs inference, no moralizing.</p>
+        <p className="text-2xs num" style={{ color: "var(--faint)" }}>What happened, what was missed, evidence-backed hypotheses why (association, not causation), and what should change tomorrow — facts vs inference, no moralizing.</p>
       </header>
 
       <section className="panel rounded p-3 grid sm:grid-cols-3 gap-3 text-2xs">

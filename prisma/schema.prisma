@@ -153,6 +153,7 @@ model User {
   SavingsGoal            SavingsGoal[]
   ReadinessDimension     ReadinessDimension[]
   ReadinessRequirement   ReadinessRequirement[]
+  GoalDependency         GoalDependency[]
 
   @@map("users")
 }
@@ -242,10 +243,28 @@ model Goal {
   GoalSkillLink        GoalSkillLink[]
   FinancialEntry       FinancialEntry[]
   ReadinessRequirement ReadinessRequirement[]
+  dependencies         GoalDependency[]     @relation("GoalDependsOn")
+  dependents           GoalDependency[]     @relation("GoalDependents")
 
   @@index([parentId])
   @@index([userId, status])
   @@map("goals")
+}
+
+model GoalDependency {
+  id               String   @id
+  userId           String   @map("user_id")
+  goalId           String   @map("goal_id")
+  dependsOnGoalId  String   @map("depends_on_goal_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  goal          Goal @relation("GoalDependsOn", fields: [goalId], references: [id], onDelete: Cascade)
+  dependsOnGoal Goal @relation("GoalDependents", fields: [dependsOnGoalId], references: [id], onDelete: Cascade)
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, dependsOnGoalId])
+  @@index([dependsOnGoalId])
+  @@map("goal_dependencies")
 }
 
 model Behavior {

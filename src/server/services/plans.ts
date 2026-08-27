@@ -138,7 +138,7 @@ export async function checkin(
   const actualMinutes = input.actualMinutes ?? inst.actualMinutes;
   const met = target ? computeMet(target, actualQty, actualMinutes) : true;
 
-  return prisma.planInstance.update({
+  const updated = await prisma.planInstance.update({
     where: { id: instanceId },
     data: {
       actualQty,
@@ -147,6 +147,59 @@ export async function checkin(
       doneAt: new Date(),
     },
   });
+
+  // Phase 5: behavior completion → SkillEvidence (FACT) for linked skills
+  if (met && behavior) {
+    // Find skills linked via GoalSkillLink (behavior → goal → skills) and via direct? For now, look up skills for behavior's goal
+    const skillIds = new Set<string>();
+    if (behavior.goalId) {
+      const glinks = await prisma.goalSkillLink.findMany({ where: { goalId: behavior.goalId, userId } });
+      for (const l of glinks) skillIds.add(l.skillId);
+    }
+    // Also check if behavior title matches a skill name (e.g., "Gym" → "Exercise consistency")
+    // We look up skills where name appears in behavior title (simple heuristic) — but for now just use goal links
+    // Additionally, map lifestyle behaviors to independent_living / physical_routine skills via name
+    const allSkills = await prisma.skill.findMany({ where: { userId, status: "ACTIVE" }, select: { id: true, name: true } });
+    const behaviorTitleLower = behavior.title.toLowerCase();
+    for (const s of allSkills) {
+      const sFirst = s.name.toLowerCase().split(" ")[0] ?? "";
+      const bFirst = behaviorTitleLower.split(" ")[0] ?? "";
+      if (sFirst && bFirst && (behaviorTitleLower.includes(sFirst) || s.name.toLowerCase().includes(bFirst))) {
+        // loose match for gym/cook/reading etc.
+        if (["Gym", "Cook", "Reading", "Walk", "Sleep", "House"].some((k) => behavior.title.includes(k))) {
+          skillIds.add(s.id);
+        }
+      }
+    }
+    for (const sid of skillIds) {
+      const exists = await prisma.skillEvidence.findFirst({
+        where: { skillId: sid, sourceType: "behavior", sourceId: behavior.id },
+      });
+      // Allow one evidence per behavior per skill per day (use instanceId as sourceId for uniqueness)
+      const dailyExists = await prisma.skillEvidence.findFirst({
+        where: { skillId: sid, sourceType: "behavior", sourceId: instanceId },
+      });
+      if (!dailyExists && !exists) {
+        // Check if we already have evidence for this behavior today (avoid duplicate for same instance)
+      }
+      if (!dailyExists) {
+        await prisma.skillEvidence.create({
+          data: {
+            id: uuidv7(),
+            userId,
+            skillId: sid,
+            title: `Completed behavior: ${behavior.title}`,
+            description: `Behavior "${behavior.title}" met target — ${actualQty ?? actualMinutes ?? 1} ${behavior.target ? JSON.stringify(behavior.target) : ""}`,
+            epistemicClass: "FACT",
+            sourceType: "behavior",
+            sourceId: instanceId,
+          },
+        });
+      }
+    }
+  }
+
+  return updated;
 }
 
 export async function adHocCheckin(
@@ -163,7 +216,7 @@ export async function adHocCheckin(
   const actualQty = input.actualQty ?? 1;
   const actualMinutes = input.actualMinutes ?? null;
 
-  return prisma.planInstance.create({
+  const created = await prisma.planInstance.create({
     data: {
       id: uuidv7(),
       userId,
@@ -177,6 +230,32 @@ export async function adHocCheckin(
       doneAt: new Date(),
     },
   });
+
+  // Phase 5: ad-hoc behavior completion → evidence
+  if (created.met) {
+    const glinks = behavior.goalId ? await prisma.goalSkillLink.findMany({ where: { goalId: behavior.goalId, userId } }) : [];
+    for (const l of glinks) {
+      const exists = await prisma.skillEvidence.findFirst({
+        where: { skillId: l.skillId, sourceType: "behavior", sourceId: created.id },
+      });
+      if (!exists) {
+        await prisma.skillEvidence.create({
+          data: {
+            id: uuidv7(),
+            userId,
+            skillId: l.skillId,
+            title: `Ad-hoc behavior: ${behavior.title}`,
+            description: `Ad-hoc completion of "${behavior.title}"`,
+            epistemicClass: "FACT",
+            sourceType: "behavior",
+            sourceId: created.id,
+          },
+        });
+      }
+    }
+  }
+
+  return created;
 }
 
 export interface TodayPlanRow extends PlanInstance {

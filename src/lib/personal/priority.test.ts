@@ -72,4 +72,16 @@ describe("prioritizeTasks", () => {
     // no numeric 0-100 score exposed
     expect((r[0]! as any).score).toBeUndefined();
   });
+
+  it("target-state relevance boosts rank when other factors equal", () => {
+    const tasks = [
+      { id: "a", title: "cook dinner", dueDate: "2026-08-28", deferredCount: 0, status: "todo", goalId: null, estimateMin: null },
+      { id: "b", title: "random task", dueDate: "2026-08-28", deferredCount: 0, status: "todo", goalId: null, estimateMin: null },
+    ];
+    const opts = { targetStateTaskIds: new Set(["a"]) };
+    const r = prioritizeTasks(tasks, goals, today, opts);
+    expect(r[0]!.id).toBe("a");
+    expect(r[0]!.reason).toContain("Poland target lifestyle");
+    expect(r[1]!.id).toBe("b");
+  });
 });

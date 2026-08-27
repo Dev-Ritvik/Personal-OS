@@ -17,7 +17,7 @@ export default function TrajectoryPage() {
     <div className="space-y-4">
       <header>
         <h1 className="text-lg font-semibold">Trajectory</h1>
-        <p className="text-2xs num" style={{ color: "var(--faint)" }}>Today {data.now} · NOW → Nov 2027 lifestyle → Masters → Settlement. No forecast AI — only schedules and gaps.</p>
+        <p className="text-2xs num" style={{ color: "var(--faint)" }}>Today {data.now} · NOW → Nov 2027 lifestyle → Masters → Settlement. No forecast AI — only schedules, gaps, and observed pace (M11) where available.</p>
       </header>
 
       {data.bottlenecks.length > 0 && (
