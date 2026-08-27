@@ -75,6 +75,8 @@ export default function TodayPage() {
 
       <CaptureBar />
 
+      <EnhancedCommandBrief />
+
       <CommandBrief />
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -225,6 +227,110 @@ function CommandBrief() {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+function EnhancedCommandBrief() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["command-brief"],
+    queryFn: () => api<{ data: any }>("/api/personal/command").then((r) => r.data),
+  });
+  if (isLoading) return <div className="panel rounded p-4 h-28 animate-pulse" />;
+  if (!data) return null;
+  return (
+    <section className="panel rounded p-4 space-y-3 border-l-2" style={{ borderLeftColor: "var(--accent)" }}>
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-xs uppercase tracking-wider" style={{ color: "var(--faint)" }}>Morning Command — {data.today}</h2>
+        <span className="text-2xs num" style={{ color: "var(--faint)" }}>{data.timezone}</span>
+      </div>
+
+      {/* Fixed commitments */}
+      <div className="grid sm:grid-cols-3 gap-3 text-2xs">
+        <div className="panel-2 rounded p-2">
+          <div className="uppercase tracking-wider" style={{ color: "var(--faint)" }}>Fixed</div>
+          <div className="text-xs font-medium mt-1">{data.fixedCommitment ? `${data.fixedCommitment.label}: ${data.fixedCommitment.window}` : "No fixed commitment — open day"}</div>
+          <div className="num mt-0.5" style={{ color: "var(--muted)" }}>Best window: early morning · Sleep 22:00–07:00 (consistency 8/10)</div>
+        </div>
+        <div className="panel-2 rounded p-2">
+          <div className="uppercase tracking-wider" style={{ color: "var(--faint)" }}>Capacity</div>
+          {data.capacity.status === "ok" ? (
+            <>
+              <div className="text-xs font-medium mt-1">Median {data.capacity.median} min · P25 {data.capacity.p25} · P75 {data.capacity.p75}</div>
+              <div className="num mt-0.5" style={{ color: data.capacity.overplan.severity === "critical" ? "var(--bad)" : data.capacity.overplan.severity === "warning" ? "var(--warn)" : "var(--muted)" }}>
+                Planned today: {data.capacity.plannedToday ?? "—"} min {data.capacity.overplan.ratio ? `· ${Math.round(data.capacity.overplan.ratio * 100) / 100}× median` : ""} {data.capacity.overplan.severity !== "ok" && data.capacity.overplan.severity !== "insufficient" ? `· ${data.capacity.overplan.severity}` : ""}
+              </div>
+            </>
+          ) : (
+            <div className="text-2xs mt-1" style={{ color: "var(--faint)" }}>Insufficient data — log consistently for 14 days. Gates: {data.capacity.gates?.filter((g:any)=>!g.passed).map((g:any)=>g.name).join(", ") || "—"}</div>
+          )}
+        </div>
+        <div className="panel-2 rounded p-2">
+          <div className="uppercase tracking-wider" style={{ color: "var(--faint)" }}>Trajectory 90d</div>
+          {data.trajectory.next90Days.length === 0 ? (
+            <div className="text-2xs mt-1" style={{ color: "var(--faint)" }}>No dated milestones in next 90 days — add target dates to goals.</div>
+          ) : (
+            <ul className="mt-1 space-y-0.5">
+              {data.trajectory.next90Days.map((m: any) => (
+                <li key={m.label} className="flex justify-between">
+                  <span className="truncate mr-2">{m.label}</span>
+                  <span className={`chip text-2xs ${m.status === "blocked" ? "chip-metric" : m.status === "at_risk" ? "chip-inference" : ""}`}>{m.status}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* Highest-value tasks with goal/skill mapping */}
+      <div>
+        <div className="text-2xs uppercase tracking-wider mb-1.5" style={{ color: "var(--faint)" }}>Highest-value today — adaptive prioritization (goal deadline · deferral · horizon · progress deficit)</div>
+        {data.prioritizedTasks.length === 0 ? (
+          <p className="text-2xs" style={{ color: "var(--faint)" }}>No tasks due. Create tasks linked to goals to see prioritization.</p>
+        ) : (
+          <ul className="space-y-2">
+            {data.prioritizedTasks.map((t: any) => (
+              <li key={t.id} className="border rounded p-2" style={{ borderColor: t.isChronic ? "var(--warn)" : "var(--line)" }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">#{t.rank} {t.title}</div>
+                    <div className="text-2xs num" style={{ color: "var(--faint)" }}>
+                      {t.urgency} · due {t.dueDate ?? "no date"} {t.deferredCount ? `· deferred ×${t.deferredCount}` : ""} {t.estimateMin ? `· est ${t.estimateMin} min` : ""}
+                    </div>
+                    {t.goal && (
+                      <div className="text-2xs mt-1">
+                        <span style={{ color: "var(--faint)" }}>Goal →</span> <Link href={`/goals/${t.goal.id}`} className="hover:underline">{t.goal.title}</Link>
+                        <span className="num" style={{ color: "var(--muted)" }}> · {t.goal.horizon} {t.goal.targetDate ? `· due ${t.goal.targetDate}` : ""} {t.goal.progress01 !== null ? `· ${Math.round(t.goal.progress01 * 100)}%` : ""}</span>
+                      </div>
+                    )}
+                    {t.skills.length > 0 && (
+                      <div className="text-2xs" style={{ color: "var(--faint)" }}>Skills: {t.skills.map((s: any) => `${s.name} (${s.currentLevel})`).join(" · ")}</div>
+                    )}
+                  </div>
+                  <span className="chip text-2xs shrink-0">{t.reason.slice(0, 48)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="text-2xs mt-1" style={{ color: "var(--faint)" }}>{data.allRankedCount} tasks ranked · <Link href="/work" className="hover:underline">Open Work</Link> to reprioritize</div>
+      </div>
+
+      {/* Risks */}
+      {data.risks.length > 0 && (
+        <div className="rounded p-2" style={{ background: "var(--panel-2)" }}>
+          <div className="text-2xs uppercase tracking-wider" style={{ color: "var(--warn)" }}>Risks — strict, evidence-based</div>
+          <ul className="list-disc list-inside text-2xs mt-1 space-y-0.5" style={{ color: "var(--muted)" }}>
+            {data.risks.map((r: string, i: number) => <li key={i}>{r}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex gap-2 text-2xs">
+        <Link href="/trajectory" className="hover:underline" style={{ color: "var(--accent)" }}>→ Trajectory</Link>
+        <Link href="/review" className="hover:underline" style={{ color: "var(--accent)" }}>→ Evening Review</Link>
+        <Link href="/readiness" className="hover:underline" style={{ color: "var(--accent)" }}>→ Readiness gaps</Link>
+      </div>
     </section>
   );
 }

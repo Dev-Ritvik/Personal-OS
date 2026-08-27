@@ -4,7 +4,8 @@ import { prisma } from "@/server/db";
 import { addDays, todayInTz } from "@/lib/metrics/dates";
 import { buildDayFacts } from "@/lib/metrics/facts";
 import { loadRawInputs } from "@/server/services/factsSource";
-import { overplanningRatio } from "@/lib/metrics/variance";
+import { overplanningRatio, planActualVariance } from "@/lib/metrics/variance";
+import { executionRate } from "@/lib/metrics/execution";
 
 export const dynamic = "force-dynamic";
 
@@ -38,18 +39,26 @@ export const GET = handle(async (req: Request) => {
     sk.currentLevel === "UNKNOWN" && skillsNeededForActiveGoals.has(sk.id)
   ).length;
 
-  // Metrics: overplanning + variance
+  // Metrics: overplanning + variance + execution (deterministic, gated)
   const dates = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(`${today}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - (29 - i));
     return d.toISOString().slice(0, 10);
   });
   let overplanningStatus: { status: string; value?: number } = { status: "insufficient_data" };
+  let varianceStatus: { status: string; value?: { minutes: number } } = { status: "insufficient_data" };
+  let executionStatus: { status: string; value?: number } = { status: "insufficient_data" };
   try {
     const raw = await loadRawInputs(s.id, dates, { timezone: s.timezone, wakingStartMin: s.wakingStartMin, wakingEndMin: s.wakingEndMin });
     const facts = buildDayFacts(dates, raw);
-    const m8 = overplanningRatio(facts);
-    overplanningStatus = m8 as never;
+    overplanningStatus = overplanningRatio(facts) as never;
+    const v = planActualVariance(facts);
+    varianceStatus = v.status === "ok" ? ({ status: "ok", value: v.value } as never) : ({ status: "insufficient_data" } as never);
+    const todayFact = facts.find((f) => f.date === today);
+    if (todayFact) {
+      const e = executionRate(todayFact);
+      executionStatus = e.status === "ok" ? ({ status: "ok", value: e.value } as never) : ({ status: "insufficient_data" } as never);
+    }
   } catch {}
 
   // Financial summary (lightweight)
@@ -90,8 +99,8 @@ export const GET = handle(async (req: Request) => {
     deferredCount,
     metrics: {
       overplanningRatio: overplanningStatus as never,
-      variance: { status: "insufficient_data" } as never,
-      executionRateToday: { status: "insufficient_data" } as never,
+      variance: varianceStatus as never,
+      executionRateToday: executionStatus as never,
     },
     skillsNeedingEvidence,
     savingsProgress,
