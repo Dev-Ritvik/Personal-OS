@@ -60,6 +60,19 @@ export default function ReadinessPage() {
               </div>
             )}
 
+            {dim.requirements?.some((r: any) => r.suggestedLevel) && (
+              <div className="mt-3">
+                <span className="text-2xs uppercase tracking-wider" style={{ color: "var(--faint)" }}>Evidence-backed suggestion</span>
+                <ul className="mt-1 space-y-0.5">
+                  {dim.requirements.filter((r: any) => r.suggestedLevel).map((r: any) => (
+                    <li key={r.id} className="text-2xs" style={{ color: "var(--muted)" }}>
+                      • {r.label}: <span className="font-medium" style={{ color: "var(--accent)" }}>Suggested {r.suggestedLevel}</span> · {r.evidenceCount} evidence · {r.factCount} FACT
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--line)" }}>
               <span className="text-2xs uppercase tracking-wider" style={{ color: "var(--faint)" }}>Next action</span>
               <p className="text-xs mt-0.5">{dim.nextAction}</p>
