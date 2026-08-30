@@ -45,17 +45,40 @@ export async function getLifestyleGaps(userId: string, today: string) {
       } else {
         const metCount = instances.filter((p) => p.met === true).length;
         const totalScheduled = instances.length;
-        // For weekly targets, compare met vs targetVal; for daily, compare met days vs 7 or actualQty sum
-        let observedCount = metCount;
-        let targetCount = isWeekly ? targetVal : 7;
-        // Quantitative perDay with actualQty: sum actualQty
-        if (!isWeekly && perDay !== null && (behavior.target as any)?.aggregation === "count") {
-          // For daily count targets, we already use metCount
+        const aggregation = (behavior.target as any)?.aggregation;
+        const unit = (behavior.target as any)?.unit ?? "sessions";
+        let observedStr = "";
+        let evidenceStr = "";
+        let isOnTrack = false;
+        let isInsufficient = false;
+
+        if (isWeekly) {
+          // Weekly session count: Gym 3/week, Chores 4/week
+          observedStr = `${metCount}/${targetVal} ${unit}`;
+          evidenceStr = `${metCount} met PlanInstances in last 7d of ${totalScheduled} scheduled`;
+          isOnTrack = metCount >= (targetVal ?? 0);
+          isInsufficient = totalScheduled < 3;
+        } else if (perDay !== null) {
+          // Quantitative daily: Walk 20 min/day → 140 min/week, Read 10 pages/day → 70 pages/week
+          // For any perDay with actualQty, sum actualQty (not just met count) to handle partial completions like 5 pages
+          const targetTotal = perDay * 7;
+          const actualTotal = instances.reduce((sum, p) => sum + (Number(p.actualQty ?? 0) || 0), 0);
+          observedStr = `${actualTotal}/${targetTotal} ${unit}`;
+          evidenceStr = `${actualTotal} ${unit} in last 7d of ${targetTotal} target (${metCount} met of ${totalScheduled} scheduled)`;
+          isOnTrack = actualTotal >= targetTotal;
+          isInsufficient = totalScheduled < 3;
+        } else {
+          const targetCount = 7;
+          observedStr = `${metCount}/${targetCount} days`;
+          evidenceStr = `${metCount} met PlanInstances in last 7d of ${totalScheduled} scheduled`;
+          isOnTrack = metCount >= targetCount;
+          isInsufficient = totalScheduled < 3;
         }
-        observed = `${observedCount}/${targetCount}`;
-        evidence = `${metCount} met PlanInstances in last 7d of ${totalScheduled} scheduled`;
-        if (observedCount >= targetCount) status = "on_track";
-        else if (instances.length < (isWeekly ? 3 : 3)) status = "insufficient_data";
+
+        observed = observedStr;
+        evidence = evidenceStr;
+        if (isOnTrack) status = "on_track";
+        else if (isInsufficient) status = "insufficient_data";
         else status = "at_risk";
       }
     }
