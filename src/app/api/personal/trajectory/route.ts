@@ -63,6 +63,7 @@ export const GET = handle(async (req: Request) => {
   const currentState = (await prisma.stateItem.findMany({ where: { userId: s.id, kind: "CURRENT" }, select: { label: true, value: true } })) as any;
   const targetState = (await prisma.stateItem.findMany({ where: { userId: s.id, kind: "TARGET" }, select: { label: true, value: true } })) as any;
 
+  const goalDeps = await prisma.goalDependency.findMany({ where: { userId: s.id }, select: { goalId: true, dependsOnGoalId: true } });
   const view = buildTrajectory({
     today,
     goals: goals.map((g) => ({
@@ -74,6 +75,7 @@ export const GET = handle(async (req: Request) => {
       progress01: progressById.get(g.id) ?? null,
       pace: paceById.get(g.id) ?? null,
     })),
+    goalDeps,
     readiness: readiness.map((r: any) => ({
       key: r.key,
       label: r.label,

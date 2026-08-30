@@ -179,6 +179,7 @@ export async function assembleCommandBrief(
   const readiness = readinessForPriority;
   const financial = await getFinancialSummary(user.id);
 
+  const goalDeps = await prisma.goalDependency.findMany({ where: { userId: user.id }, select: { goalId: true, dependsOnGoalId: true } });
   const trajectory = buildTrajectory({
     today,
     goals: goals.map((g) => ({
@@ -190,6 +191,7 @@ export async function assembleCommandBrief(
       progress01: goalProgressById.get(g.id) ?? null,
       pace: goalPaceById.get(g.id) ?? null,
     })),
+    goalDeps,
     readiness: readiness.map((r: any) => ({
       key: r.key,
       label: r.label,

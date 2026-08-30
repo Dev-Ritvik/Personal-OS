@@ -96,7 +96,7 @@ describe("buildTrajectory", () => {
   it("1. distant deadline + zero observed velocity → at_risk (M11 pace 0)", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "DistantZero", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.31, pace: { status: "ok", value: { pace: 0 } } }],
+      goals: [{ id: "g1", title: "DistantZero", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.31, pace: { status: "ok", value: { pace: 0 } } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -108,7 +108,7 @@ describe("buildTrajectory", () => {
   it("2. 31% progress + zero recent progress (pace 0) → at_risk", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "ThirtyOne", horizon: "annual", status: "active", targetDate: "2027-02-27", progress01: 0.31, pace: { status: "ok", value: { pace: 0 } } }],
+      goals: [{ id: "g1", title: "ThirtyOne", horizon: "annual", status: "active", targetDate: "2027-02-27", progress01: 0.31, pace: { status: "ok", value: { pace: 0 } } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -120,7 +120,7 @@ describe("buildTrajectory", () => {
   it("3. near deadline + insufficient observation window → insufficient_data", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "NearInsufficient", horizon: "quarterly", status: "active", targetDate: "2026-09-10", progress01: 0.2, pace: { status: "insufficient_data" } }],
+      goals: [{ id: "g1", title: "NearInsufficient", horizon: "quarterly", status: "active", targetDate: "2026-09-10", progress01: 0.2, pace: { status: "insufficient_data" } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -132,7 +132,7 @@ describe("buildTrajectory", () => {
   it("4. healthy velocity (pace 1.2) → on_track", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "Healthy", horizon: "quarterly", status: "active", targetDate: "2026-11-01", progress01: 0.6, pace: { status: "ok", value: { pace: 1.2 } } }],
+      goals: [{ id: "g1", title: "Healthy", horizon: "quarterly", status: "active", targetDate: "2026-11-01", progress01: 0.6, pace: { status: "ok", value: { pace: 1.2 } } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -144,7 +144,7 @@ describe("buildTrajectory", () => {
   it("5. overdue goal → blocked", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "OverduePace", horizon: "annual", status: "active", targetDate: "2026-08-20", progress01: 0.9, pace: { status: "ok", value: { pace: 0.9 } } }],
+      goals: [{ id: "g1", title: "OverduePace", horizon: "annual", status: "active", targetDate: "2026-08-20", progress01: 0.9, pace: { status: "ok", value: { pace: 0.9 } } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -156,7 +156,7 @@ describe("buildTrajectory", () => {
   it("6. achieved goal → done regardless of pace", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "DoneGoal", horizon: "annual", status: "achieved", targetDate: "2026-09-10", progress01: 1, pace: { status: "ok", value: { pace: 0 } } }],
+      goals: [{ id: "g1", title: "DoneGoal", horizon: "annual", status: "achieved", targetDate: "2026-09-10", progress01: 1, pace: { status: "ok", value: { pace: 0 } } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -168,7 +168,7 @@ describe("buildTrajectory", () => {
   it("7. insufficient observation window → insufficient_data (not on_track)", () => {
     const view = buildTrajectory({
       today,
-      goals: [{ id: "g1", title: "NoWindow", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.6, pace: { status: "insufficient_data" } }],
+      goals: [{ id: "g1", title: "NoWindow", horizon: "annual", status: "active", targetDate: "2027-08-27", progress01: 0.6, pace: { status: "insufficient_data" } as any }],
       readiness: [],
       financial: null,
       currentState: [],
@@ -191,4 +191,90 @@ describe("buildTrajectory", () => {
     expect(["at_risk", "insufficient_data"].includes(m!.status)).toBe(true);
     expect(m!.status).not.toBe("on_track");
   });
+
+  // Loop 2 — dependency-aware
+  it("one dependency annotates blockedBy", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [
+        { id: "qhr", title: "QHR", horizon: "quarterly", status: "active", targetDate: "2026-11-01", progress01: 0.2, pace: { status: "ok", value: { pace: 0.3 } } as any },
+        { id: "remote", title: "Remote-job", horizon: "annual", status: "active", targetDate: "2027-05-01", progress01: 0.4, pace: { status: "ok", value: { pace: 0.5 } } as any },
+      ],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+      goalDeps: [{ goalId: "remote", dependsOnGoalId: "qhr" }],
+    });
+    const remote = view.milestones.find((m) => m.label === "Remote-job");
+    expect(remote?.evidence).toContain("Blocked by: QHR");
+  });
+
+  it("three-level chain QHR→Remote→₹5L→Poland annotates", () => {
+    const goals = [
+      { id: "qhr", title: "QHR", horizon: "quarterly", status: "active", targetDate: "2026-11-01", progress01: 0.2, pace: { status: "ok", value: { pace: 0.3 } } as any },
+      { id: "remote", title: "Remote-job", horizon: "annual", status: "active", targetDate: "2027-05-01", progress01: 0.3, pace: { status: "ok", value: { pace: 0.4 } } as any },
+      { id: "cash", title: "₹5L", horizon: "annual", status: "active", targetDate: "2027-09-01", progress01: 0.2, pace: { status: "ok", value: { pace: 0.2 } } as any },
+      { id: "poland", title: "Poland living", horizon: "annual", status: "active", targetDate: "2027-09-01", progress01: 0.1, pace: { status: "ok", value: { pace: 0.1 } } as any },
+    ];
+    const view = buildTrajectory({
+      today,
+      goals,
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+      goalDeps: [
+        { goalId: "remote", dependsOnGoalId: "qhr" },
+        { goalId: "cash", dependsOnGoalId: "remote" },
+        { goalId: "poland", dependsOnGoalId: "cash" },
+      ],
+    });
+    expect(view.milestones.find((m) => m.label === "Remote-job")?.evidence).toContain("QHR");
+    expect(view.milestones.find((m) => m.label === "₹5L")?.evidence).toContain("Remote-job");
+    expect(view.milestones.find((m) => m.label === "Poland living")?.evidence).toContain("₹5L");
+  });
+
+  it("achieved dependency no longer blocks", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [
+        { id: "qhr", title: "QHR", horizon: "quarterly", status: "achieved", targetDate: "2026-11-01", progress01: 1 },
+        { id: "remote", title: "Remote-job", horizon: "annual", status: "active", targetDate: "2027-05-01", progress01: 0.4, pace: { status: "ok", value: { pace: 0.5 } } as any },
+      ],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+      goalDeps: [{ goalId: "remote", dependsOnGoalId: "qhr" }],
+    });
+    const remote = view.milestones.find((m) => m.label === "Remote-job");
+    // QHR is done, so Remote-job should not be annotated as blocked by QHR (since QHR done is not at_risk)
+    expect(remote?.evidence).not.toContain("Blocked by: QHR");
+  });
+
+  it("cycle-safe traversal does not infinite loop", () => {
+    const view = buildTrajectory({
+      today,
+      goals: [
+        { id: "a", title: "A", horizon: "annual", status: "active", targetDate: "2027-05-01", progress01: 0.2, pace: { status: "ok", value: { pace: 0.3 } } as any },
+        { id: "b", title: "B", horizon: "annual", status: "active", targetDate: "2027-06-01", progress01: 0.2, pace: { status: "ok", value: { pace: 0.3 } } as any },
+      ],
+      readiness: [],
+      financial: null,
+      currentState: [],
+      targetState: [],
+      goalDeps: [
+        { goalId: "a", dependsOnGoalId: "b" },
+        { goalId: "b", dependsOnGoalId: "a" },
+      ],
+    });
+    // Should not throw, should still produce milestones
+    expect(view.milestones.length).toBeGreaterThan(0);
+  });
 });
+
+
+
+
+

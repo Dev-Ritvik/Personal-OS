@@ -65,6 +65,7 @@ export function buildTrajectory(args: {
   financial: TrajectoryFinancial | null;
   currentState: Array<{ label: string; value: string }>;
   targetState: Array<{ label: string; value: string }>;
+  goalDeps?: Array<{ goalId: string; dependsOnGoalId: string }>;
 }): TrajectoryView {
   const { today, goals, readiness, financial } = args;
   const milestones: TrajectoryMilestone[] = [];
@@ -118,6 +119,28 @@ export function buildTrajectory(args: {
     }
 
     milestones.push({ date: g.targetDate, label: g.title, kind: "goal", status, evidence, goalId: g.id });
+  }
+
+  // Dependency-aware annotation (Phase 2) — cycle-safe, reads GoalDependency records
+  if (args.goalDeps && args.goalDeps.length > 0) {
+    const statusByGoalId = new Map(milestones.filter((m) => m.goalId).map((m) => [m.goalId!, m.status]));
+    const titleByGoalId = new Map(goals.map((g) => [g.id, g.title]));
+    const visited = new Set<string>();
+    for (const m of milestones.filter((mm) => mm.kind === "goal" && mm.goalId)) {
+      if (m.status !== "at_risk" && m.status !== "blocked" && m.status !== "insufficient_data") continue;
+      const deps = args.goalDeps!.filter((d) => d.goalId === m.goalId!);
+      for (const dep of deps) {
+        if (visited.has(dep.dependsOnGoalId)) continue;
+        visited.add(dep.dependsOnGoalId);
+        const depStatus = statusByGoalId.get(dep.dependsOnGoalId);
+        if (depStatus === "at_risk" || depStatus === "blocked" || depStatus === "insufficient_data") {
+          const depTitle = titleByGoalId.get(dep.dependsOnGoalId) ?? dep.dependsOnGoalId;
+          // Annotate evidence with dependency, do not change status (explanation layer)
+          m.evidence += ` · Blocked by: ${depTitle} (${depStatus})`;
+          break;
+        }
+      }
+    }
   }
 
   // Readiness gaps → milestones (use readiness status)

@@ -9,7 +9,9 @@ export async function getLifestyleGaps(userId: string, today: string) {
     prisma.stateItem.findMany({ where: { userId, kind: "TARGET" }, select: { label: true, value: true, domain: true } }),
   ]);
 
-  // For each behavior, compute observed vs target (simple: count PlanInstances last 28d)
+  // For each behavior, aggregate PlanInstances in last 7d vs target
+  const todayDate = new Date(today + "T00:00:00Z");
+  const weekAgo = new Date(todayDate); weekAgo.setUTCDate(todayDate.getUTCDate() - 6);
   const gaps = [];
   for (const req of requirements) {
     const firstWord = req.requirement.toLowerCase().split(" ")[0] ?? "";
@@ -19,12 +21,43 @@ export async function getLifestyleGaps(userId: string, today: string) {
     let status: "insufficient_data" | "at_risk" | "on_track" = "insufficient_data";
     let evidence = "No behavior scheduled";
     if (behavior) {
-      const targetVal = (behavior.target as any)?.weeklyMin ?? (behavior.target as any)?.perDay ?? null;
-      const schedule = behavior.schedule as any;
-      // Simple: if behavior exists, we have a target, but no observation yet → insufficient
-      target = `${behavior.title}: ${targetVal ? `${targetVal} ${ (behavior.target as any)?.unit ?? ""}` : JSON.stringify(behavior.target)}`;
-      evidence = `Behavior "${behavior.title}" scheduled as ${JSON.stringify(schedule)}`;
-      status = "insufficient_data";
+      const targetVal = (behavior.target as any)?.weeklyMin ?? null;
+      const perDay = (behavior.target as any)?.perDay ?? null;
+      const isWeekly = targetVal !== null;
+      const expected = isWeekly ? targetVal : (perDay !== null ? perDay * 7 : 7);
+      const unit = (behavior.target as any)?.unit ?? "sessions";
+      target = `${behavior.title}: ${isWeekly ? `${targetVal}/${unit} per week` : perDay ? `${perDay}/${unit} per day` : JSON.stringify(behavior.target)}`;
+      // Count PlanInstances in last 7d where behavior met
+      const instances = await prisma.planInstance.findMany({
+        where: {
+          userId,
+          refType: "behavior",
+          refId: behavior.id,
+          localDate: { gte: weekAgo, lte: todayDate },
+          voidedAt: null,
+        },
+        select: { met: true, actualQty: true },
+      });
+      if (instances.length === 0) {
+        observed = "No scheduled instances in last 7d";
+        evidence = `0 PlanInstances in last 7d for "${behavior.title}"`;
+        status = "insufficient_data";
+      } else {
+        const metCount = instances.filter((p) => p.met === true).length;
+        const totalScheduled = instances.length;
+        // For weekly targets, compare met vs targetVal; for daily, compare met days vs 7 or actualQty sum
+        let observedCount = metCount;
+        let targetCount = isWeekly ? targetVal : 7;
+        // Quantitative perDay with actualQty: sum actualQty
+        if (!isWeekly && perDay !== null && (behavior.target as any)?.aggregation === "count") {
+          // For daily count targets, we already use metCount
+        }
+        observed = `${observedCount}/${targetCount}`;
+        evidence = `${metCount} met PlanInstances in last 7d of ${totalScheduled} scheduled`;
+        if (observedCount >= targetCount) status = "on_track";
+        else if (instances.length < (isWeekly ? 3 : 3)) status = "insufficient_data";
+        else status = "at_risk";
+      }
     }
     gaps.push({
       requirement: req.requirement,
