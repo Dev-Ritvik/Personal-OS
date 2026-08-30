@@ -1,0 +1,259 @@
+﻿import { prisma } from "../db";
+
+export type ReadinessStatus = "UNKNOWN" | "FOUNDATIONAL" | "DEVELOPING" | "READY" | "BLOCKED";
+
+const SKILL_LEVEL_ORDER = ["UNKNOWN", "BEGINNER", "DEVELOPING", "FUNCTIONAL", "STRONG", "ADVANCED"] as const;
+type SkillLevel = (typeof SKILL_LEVEL_ORDER)[number];
+
+const EPISTEMIC_WEIGHT = {
+  FACT: 1.0,
+  ASSESSMENT: 0.8,
+  SELF_REPORT: 0.5,
+  INFERENCE: 0.3,
+} as const;
+
+type EpistemicClass = keyof typeof EPISTEMIC_WEIGHT;
+
+function levelToIndex(level: string): number {
+  return SKILL_LEVEL_ORDER.indexOf(level as any);
+}
+
+function indexToLevel(idx: number): string {
+  if (idx < 0) return "UNKNOWN";
+  if (idx >= SKILL_LEVEL_ORDER.length) return "ADVANCED";
+  return SKILL_LEVEL_ORDER[idx];
+}
+
+function computeSuggestedLevel(evidence: { epistemicClass: string; assessedLevel: string | null }[]): { level: string; weight: number; evidenceCount: number; factCount: number } | null {
+  if (evidence.length === 0) return null;
+  let totalWeight = 0;
+  let weightedSum = 0;
+  let factCount = 0;
+  for (const ev of evidence) {
+    const weight = (({ FACT: 1.0, ASSESSMENT: 0.8, SELF_REPORT: 0.5, INFERENCE: 0.3 } as const)[ev.epistemicClass as keyof typeof ev]) ?? 0.1;
+    if (ev.assessedLevel) {
+      const idx = SKILL_LEVEL_ORDER.indexOf(ev.assessedLevel as any);
+      if (idx >= 0) {
+        weightedSum += idx * weight;
+        totalWeight += weight;
+      }
+    }
+    if (ev.epistemicClass === "FACT") factCount++;
+  }
+  if (totalWeight === 0) return null;
+  const suggestedIdx = Math.round(weightedSum / totalWeight);
+  const clampedIdx = Math.max(0, Math.min(suggestedIdx, SKILL_LEVEL_ORDER.length - 1));
+  return {
+    level: SKILL_LEVEL_ORDER[clampedIdx],
+    weight: totalWeight,
+    evidenceCount: evidence.length,
+    factCount,
+  };
+}
+
+function levelToIndex(level: string): number {
+  return SKILL_LEVEL_ORDER.indexOf(level as any);
+}
+
+function indexToLevel(idx: number): string {
+  if (idx < 0) return "UNKNOWN";
+  if (idx >= SKILL_LEVEL_ORDER.length) return "ADVANCED";
+  return SKILL_LEVEL_ORDER[idx];
+}
+
+function evaluateRequirement(
+  req: { skillId: string | null; goalId: string | null; label: string },
+  lookup: {
+    skillLevels: Map<string, string>;
+    goalStatuses: Map<string, string>;
+    suggestedLevels: Map<string, { level: string; weight: number; evidenceCount: number; factCount: number } | null>;
+  },
+): { met: boolean; reason: string; suggestedLevel?: string; evidenceCount?: number; factCount?: number } {
+  if (req.skillId) {
+    const level = lookup.skillLevels.get(req.skillId);
+    const suggested = lookup.suggestedLevels.get(req.skillId);
+    if (!level || level === "UNKNOWN") {
+      if (suggested?.level && suggested.level !== "UNKNOWN") {
+        const developingIdx = SKILL_LEVEL_ORDER.indexOf("DEVELOPING");
+        const suggestedIdx = SKILL_LEVEL_ORDER.indexOf(suggested.level as any);
+        return {
+          met: suggestedIdx >= SKILL_LEVEL_ORDER.indexOf("DEVELOPING"),
+          reason: `Evidence suggests ${suggested.level} (${suggested.evidenceCount} evidence, ${suggested.factCount} FACT)`,
+          suggestedLevel: suggested.level,
+          evidenceCount: suggested.evidenceCount,
+          factCount: suggested.factCount,
+        };
+      }
+      return { met: false, reason: "Skill not assessed" };
+    }
+    if (level === "BEGINNER") return { met: false, reason: "Skill at BEGINNER â€” needs DEVELOPING+" };
+    return { met: true, reason: `Skill ${level}` };
+  }
+  if (req.goalId) {
+    const status = lookup.goalStatuses.get(req.goalId);
+    if (!status) return { met: false, reason: "Goal not found" };
+    if (status === "achieved") return { met: true, reason: "Goal achieved" };
+    if (status === "active") return { met: false, reason: `Goal ${status}` };
+    return { met: false, reason: `Goal ${status}` };
+  }
+  return { met: false, reason: "No linked skill or goal â€” manual check required" };
+}
+
+export async function computeReadiness(userId: string) {
+  const [dimensions, skills, goals, evidence] = await Promise.all([
+    prisma.readinessDimension.findMany({ where: { userId }, orderBy: { sort: "asc" }, include: { requirements: true } }),
+    prisma.skill.findMany({ where: { userId }, select: { id: true, currentLevel: true } }),
+    prisma.goal.findMany({ where: { userId, deletedAt: null }, select: { id: true, status: true } }),
+    prisma.skillEvidence.findMany({ where: { userId }, select: { skillId: true, epistemicClass: true, assessedLevel: true } }),
+  ]);
+
+  const skillLevels = new Map(skills.map((s) => [s.id, s.currentLevel as string]));
+  const goalStatuses = new Map(goals.map((g) => [g.id, g.status as string]));
+
+  // Compute suggested levels from evidence
+  const evidenceBySkill = new Map<string, Array<{ epistemicClass: string; assessedLevel: string | null }>>();
+  for (const ev of evidence) {
+    if (!evidenceBySkill.has(ev.skillId)) evidenceBySkill.set(ev.skillId, []);
+    evidenceBySkill.get(ev.skillId)!.push(ev);
+  }
+  const suggestedLevelsMap = new Map<string, { level: string; weight: number; evidenceCount: number; factCount: number } | null>();
+  for (const s of skills) {
+    const ev = evidenceBySkill.get(s.id) ?? [];
+    if (ev.length === 0) {
+      suggestedLevelsMap.set(s.id, null);
+      continue;
+    }
+    let totalWeight = 0;
+    let weightedSum = 0;
+    let factCount = 0;
+    for (const ev of ev) {
+      const weight = (({ FACT: 1.0, ASSESSMENT: 0.8, SELF_REPORT: 0.5, INFERENCE: 0.3 } as const)[ev.epistemicClass as keyof typeof ev]) ?? 0.1;
+      if (ev.assessedLevel) {
+        const idx = SKILL_LEVEL_ORDER.indexOf(ev.assessedLevel as any);
+        if (idx >= 0) {
+          weightedSum += idx * weight;
+          totalWeight += weight;
+        }
+      }
+      if (ev.epistemicClass === "FACT") factCount++;
+    }
+    if (totalWeight === 0) {
+      suggestedLevelsMap.set(s.id, null);
+      continue;
+    }
+    const suggestedIdx = Math.round(weightedSum / totalWeight);
+    const clampedIdx = Math.max(0, Math.min(suggestedIdx, SKILL_LEVEL_ORDER.length - 1));
+    suggestedLevelsMap.set(s.id, {
+      level: SKILL_LEVEL_ORDER[clampedIdx],
+      weight: totalWeight,
+      evidenceCount: ev.length,
+      factCount,
+    });
+  }
+
+  const dimensions = await prisma.readinessDimension.findMany({ where: { userId: evidence[0]?.userId ?? "" }, orderBy: { sort: "asc" }, include: { requirements: true } });
+
+  const skillLevels = new Map(skills.map((s) => [s.id, s.currentLevel as string]));
+  const goalStatuses = new Map(goals.map((g) => [g.id, g.status as string]));
+  const suggestedLevelsMap2 = new Map<string, { level: string; weight: number; evidenceCount: number; factCount: number } | null>();
+  for (const s of skills) {
+    suggestedLevelsMap2.set(s.id, suggestedLevelsMap.get(s.id) ?? null);
+  }
+
+  return dimensions.map((dim) => {
+    const reqs = dim.requirements;
+    if (reqs.length === 0) {
+      return {
+        key: dim.key,
+        label: dim.label,
+        description: dim.description,
+        status: "UNKNOWN" as ReadinessStatus,
+        missing: [] as string[],
+        nextAction: "Define requirements for this dimension",
+        total: 0,
+        met: 0,
+      };
+    }
+
+    const lookup = {
+      skillLevels,
+      goalStatuses,
+      suggestedLevels: new Map(skills.map((s) => [s.id, suggestedLevelsMap.get(s.id) ?? null])),
+    };
+
+    const evaluated = reqs.map((r) => {
+      if (r.skillId) {
+        const level = lookup.skillLevels.get(r.skillId);
+        const suggested = lookup.suggestedLevels.get(r.skillId);
+        if (!level || level === "UNKNOWN") {
+          if (suggested?.level && suggested.level !== "UNKNOWN") {
+            const developingIdx = SKILL_LEVEL_ORDER.indexOf("DEVELOPING");
+            const suggestedIdx = SKILL_LEVEL_ORDER.indexOf(suggested.level as any);
+            return {
+              met: suggestedIdx >= SKILL_LEVEL_ORDER.indexOf("DEVELOPING"),
+              reason: `Evidence suggests ${suggested.level} (${suggested.evidenceCount} evidence, ${suggested.factCount} FACT)`,
+              suggestedLevel: suggested.level,
+              evidenceCount: suggested.evidenceCount,
+              factCount: suggested.factCount,
+            };
+          }
+          return { met: false, reason: "Skill not assessed" };
+        }
+        if (level === "BEGINNER") return { met: false, reason: "Skill at BEGINNER â€” needs DEVELOPING+" };
+        return { met: true, reason: `Skill ${level}` };
+      }
+      if (r.goalId) {
+        const status = lookup.goalStatuses.get(r.goalId);
+        if (!status) return { met: false, reason: "Goal not found" };
+        if (status === "achieved") return { met: true, reason: "Goal achieved" };
+        if (status === "active") return { met: false, reason: `Goal ${status}` };
+        return { met: false, reason: `Goal ${status}` };
+      }
+      return { met: false, reason: "No linked skill or goal â€” manual check required" };
+    });
+
+    const evaluated = reqs.map((r) => ({ req: r, ...evaluateRequirement(r, {
+      skillLevels,
+      goalStatuses,
+      suggestedLevels: new Map(skills.map((s) => [s.id, suggestedLevelsMap.get(s.id) ?? null])),
+    }) }));
+    const metCount = evaluated.filter((e) => e.met).length;
+    const total = reqs.length;
+    const ratio = metCount / total;
+
+    let status: any;
+    if (metCount === 0) status = "BLOCKED";
+    else if (ratio < 0.3) status = "FOUNDATIONAL";
+    else if (ratio < 0.7) status = "DEVELOPING";
+    else if (ratio < 1) status = "DEVELOPING";
+    else status = "READY";
+
+    const hasUnlinked = reqs.some((r) => !r.skillId && !r.goalId);
+    if (hasUnlinked && metCount === 0) status = "UNKNOWN";
+
+    const missing = evaluated.filter((e) => !e.met).map((e) => `${e.req.label} â€” ${e.reason}`);
+    const nextAction = missing[0] ?? "All requirements met";
+
+    return {
+      key: dim.key,
+      label: dim.label,
+      description: dim.description,
+      status,
+      missing,
+      nextAction,
+      total,
+      met: metCount,
+      requirements: evaluated.map((e) => ({
+        id: e.req.id,
+        label: e.req.label,
+        met: e.met,
+        reason: e.reason,
+        suggestedLevel: e.suggestedLevel,
+        evidenceCount: e.evidenceCount,
+        factCount: e.factCount,
+        skillId: e.req.skillId,
+        goalId: e.req.goalId,
+})),
+    });
+  });
+};

@@ -8,6 +8,7 @@ const NAV = [
   { href: "/today", label: "Today", icon: "◉" },
   { href: "/trajectory", label: "Trajectory", icon: "→" },
   { href: "/review", label: "Review", icon: "⟡" },
+  { href: "/lifestyle", label: "Lifestyle", icon: "⌖" },
   { href: "/timeline", label: "Timeline", icon: "▤" },
   { href: "/goals", label: "Goals", icon: "△" },
   { href: "/work", label: "Work", icon: "☐" },

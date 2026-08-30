@@ -19,6 +19,7 @@ import { diffDays } from "@/lib/metrics/dates";
 import { goalProgressObservations } from "./snapshot";
 import { computeReadiness } from "./readiness";
 import { getSummary as getFinancialSummary } from "./financials";
+import { findBottleneckChain } from "./goalDependencies";
 
 export async function assembleCommandBrief(
   user: { id: string; timezone: string; wakingStartMin: number; wakingEndMin: number },
@@ -214,6 +215,11 @@ export async function assembleCommandBrief(
   else if (overplan.severity === "warning") risks.push(`Planned ${plannedToday} min is ${Math.round((overplan.ratio! - 1) * 100)}% above recent median capacity.`);
   if (ranked.filter((t) => t.isChronic).length > 0) risks.push(`${ranked.filter((t) => t.isChronic).length} chronically deferred task(s) need decomposition or explicit drop.`);
   if (trajectory.bottlenecks.length > 0) risks.push(`Bottleneck: ${trajectory.bottlenecks[0]}`);
+  // GoalDependency bottleneck (cycle-safe)
+  try {
+    const depBottlenecks = await findBottleneckChain(user.id, today);
+    for (const b of depBottlenecks.slice(0, 1)) risks.push(`Dependency: ${b}`);
+  } catch {}
   if (capacity.status !== "ok") risks.push(`Insufficient data for capacity — log consistently for 14 days.`);
 
   // Phase 7: Cold-start mode — explicit assumption when no capacity
