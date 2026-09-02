@@ -1,11 +1,11 @@
 {
-  "requests": 40,
+  "requests": 50,
   "failures": 0,
-  "p50": 34.8,
-  "p95": 51.6,
-  "p99": 65.8,
-  "max": 65.8,
+  "p50": 18.2,
+  "p95": 33,
+  "p99": 89.6,
+  "max": 89.6,
   "unit": "ms",
-  "measuredAt": "2026-08-27T04:56:15.251Z",
+  "measuredAt": "2026-09-02T10:07:21.793Z",
   "note": "local measurement only; AC13 verdict requires production-like deployment"
 }
